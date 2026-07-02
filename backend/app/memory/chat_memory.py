@@ -42,13 +42,14 @@ class _SessionStore:
 
     # ── Session lifecycle ─────────────────────────────────────
 
-    def create_session(self, session_id: str, title: str = "New Chat") -> None:
+    def create_session(self, session_id: str, title: str = "New Chat", user_id: str | None = None) -> None:
         if session_id not in self._data:
             self._data[session_id] = {
                 "title": title,
                 "messages": [],
                 "doc_name": None,
                 "doc_type": None,
+                "user_id": user_id,
             }
             _save(self._data)
 
@@ -57,7 +58,10 @@ class _SessionStore:
             del self._data[session_id]
             _save(self._data)
 
-    def all_sessions(self) -> list[dict]:
+    def all_sessions(self, user_id: str | None = None) -> list[dict]:
+        items = self._data.items()
+        if user_id is not None:
+            items = [(sid, s) for sid, s in items if s.get("user_id") == user_id]
         return [
             {
                 "session_id": sid,
@@ -65,8 +69,13 @@ class _SessionStore:
                 "doc_name": s.get("doc_name"),
                 "doc_type": s.get("doc_type"),
             }
-            for sid, s in self._data.items()
+            for sid, s in items
         ]
+
+    def get_owner(self, session_id: str) -> str | None:
+        """Return the user_id that owns this session, or None if the session
+        has no recorded owner (e.g. created before this field existed)."""
+        return self._data.get(session_id, {}).get("user_id")
 
     def __contains__(self, session_id: str) -> bool:
         return session_id in self._data

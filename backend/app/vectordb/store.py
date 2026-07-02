@@ -17,14 +17,21 @@ def store_chunks(chunks, session_id: str):
     if not session_id:
         raise ValueError("store_chunks requires a session_id to scope chunks")
 
+    if not chunks:
+        return
+
     upload_tag = uuid.uuid4().hex[:8]
 
-    for index, chunk in enumerate(chunks):
-        embedding = embedding_model.encode(chunk).tolist()
+    # Batch encode all chunks at once — much faster than one-by-one
+    embeddings = embedding_model.encode(chunks, show_progress_bar=False).tolist()
 
-        collection.add(
-            ids=[f"{session_id}_{upload_tag}_{index}"],
-            documents=[chunk],
-            embeddings=[embedding],
-            metadatas=[{"session_id": session_id}],
-        )
+    ids = [f"{session_id}_{upload_tag}_{i}" for i in range(len(chunks))]
+    metadatas = [{"session_id": session_id} for _ in chunks]
+
+    # Single bulk insert instead of N individual adds
+    collection.add(
+        ids=ids,
+        documents=chunks,
+        embeddings=embeddings,
+        metadatas=metadatas,
+    )

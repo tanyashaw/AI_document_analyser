@@ -8,17 +8,23 @@ app = FastAPI(
     title="RFP Intelligence Agent"
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+import os
+
+ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()]
+if not ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS = [
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
-    ],
-    allow_origin_regex="https?://(localhost|127\\.0\\.0\\.1)(:\\d+)?",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex="https?://.*",  # Allow all domains in production since users will deploy to various netlify/vercel URLs
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

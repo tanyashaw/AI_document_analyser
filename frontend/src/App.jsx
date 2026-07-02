@@ -1,41 +1,63 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+// ── Per-browser identity ──────────────────────────────────────
+// Lightweight isolation: not real authentication, just a persistent random
+// ID per browser so one person's sessions don't show up for someone else
+// using the same shared backend. Sent as X-User-Id on every request.
+function getUserId() {
+  const KEY = "rfp_agent_user_id";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+const USER_ID = getUserId();
+
+function apiFetch(url, options = {}) {
+  return fetch(url, {
+    ...options,
+    headers: { ...(options.headers || {}), "X-User-Id": USER_ID },
+  });
+}
 
 // ── Icons ──────────────────────────────────────────────────
 const I = {
-  Menu: () => <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 12h16M4 18h16"/></svg>,
-  Plus: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v16m8-8H4"/></svg>,
-  Msg: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>,
-  Send: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>,
-  Bot: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>,
-  User: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>,
-  Sun: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.07-6.07l-.71.71M7.64 16.36l-.71.71M18.36 16.36l-.71-.71M7.05 7.64l-.71-.71M12 7a5 5 0 100 10A5 5 0 0012 7z"/></svg>,
-  Moon: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>,
-  Upload: () => <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>,
-  File: () => <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>,
-  Spin: () => <svg className="spin" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25"/><path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>,
-  Warn: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>,
-  Check: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>,
-  ChevR: () => <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"/></svg>,
-  ChevL: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"/></svg>,
-  ChevRn: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"/></svg>,
-  Download: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>,
-  Trash: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>,
-  Edit: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>,
-  X: () => <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12"/></svg>,
-  Target: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>,
-  Clock: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>,
-  Shield: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>,
-  Alert: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>,
-  Pdf: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 13h1.5a1 1 0 010 2H9v-4h1.5m4 0h.5a1 1 0 010 2H13v2"/></svg>,
-  Collapse: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>,
-  Expand: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg>,
-  Text: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 10h16M4 14h10M4 18h6"/></svg>,
-  Chat: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
-  ChevDown: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"/></svg>,
-  ChevUp: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7"/></svg>,
+  Menu: () => <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 12h16M4 18h16" /></svg>,
+  Plus: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v16m8-8H4" /></svg>,
+  Msg: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>,
+  Send: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>,
+  Bot: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>,
+  User: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+  Sun: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M12 3v1m0 16v1m8.66-9H21M3 12H2m15.07-6.07l-.71.71M7.64 16.36l-.71.71M18.36 16.36l-.71-.71M7.05 7.64l-.71-.71M12 7a5 5 0 100 10A5 5 0 0012 7z" /></svg>,
+  Moon: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>,
+  Upload: () => <svg width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>,
+  File: () => <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
+  Spin: () => <svg className="spin" width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" opacity="0.25" /><path fill="currentColor" opacity="0.75" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>,
+  Warn: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
+  Check: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  ChevR: () => <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>,
+  ChevL: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>,
+  ChevRn: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>,
+  Download: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>,
+  Trash: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>,
+  Edit: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>,
+  X: () => <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>,
+  Target: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
+  Clock: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  Shield: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
+  Alert: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
+  Pdf: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 13h1.5a1 1 0 010 2H9v-4h1.5m4 0h.5a1 1 0 010 2H13v2" /></svg>,
+  Collapse: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>,
+  Expand: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>,
+  Text: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 10h16M4 14h10M4 18h6" /></svg>,
+  Chat: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>,
+  ChevDown: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>,
+  ChevUp: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" /></svg>,
 };
 
 const cx = (...a) => a.filter(Boolean).join(" ");
@@ -105,61 +127,60 @@ function generatePDFReport(data, sessionTitle) {
   <div class="section commercial"><div class="section-header"><span>💰</span><h2>Commercial Requirements</h2></div><ul>${items(data.commercial_requirements)}</ul></div>
   <div class="section deadline"><div class="section-header"><span>⏰</span><h2>Key Deadlines</h2></div><ul>${items(data.deadlines)}</ul></div>
   <div class="section staffing"><div class="section-header"><span>👥</span><h2>Staffing Requirements</h2></div><ul>${items(data.staffing_requirements)}</ul></div>
-  <div class="section risks"><div class="section-header"><span>⚠️</span><h2>Risks</h2></div><ul>${
-    data.risks?.length ? data.risks.map((r, i) => {
-      if (typeof r === "string") return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r}</li>`;
-      const sevClass = r.severity ? `risk-sev risk-sev-${r.severity.toLowerCase()}` : "";
-      return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r.risk || r.item || ""} ${r.severity ? `<span class="${sevClass}">${r.severity}</span>` : ""} ${r.type ? `[${r.type}]` : ""} ${r.page_ref && r.page_ref !== "N/A" ? `<em>(${r.page_ref})</em>` : ""}</li>`;
-    }).join("") : "<li style='color:#999;font-size:12px;'>None detected</li>"
-  }</ul></div>
+  <div class="section risks"><div class="section-header"><span>⚠️</span><h2>Risks</h2></div><ul>${data.risks?.length ? data.risks.map((r, i) => {
+    if (typeof r === "string") return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r}</li>`;
+    const sevClass = r.severity ? `risk-sev risk-sev-${r.severity.toLowerCase()}` : "";
+    return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r.risk || r.item || ""} ${r.severity ? `<span class="${sevClass}">${r.severity}</span>` : ""} ${r.type ? `[${r.type}]` : ""} ${r.page_ref && r.page_ref !== "N/A" ? `<em>(${r.page_ref})</em>` : ""}</li>`;
+  }).join("") : "<li style='color:#999;font-size:12px;'>None detected</li>"
+    }</ul></div>
   <div class="section compliance"><div class="section-header"><span>🛡️</span><h2>Compliance Requirements</h2></div>${complianceTable(data.compliance_requirements)}</div>
   <div class="section highlights"><div class="section-header"><span>💡</span><h2>Key Highlights</h2></div><ul>${items(data.key_highlights)}</ul></div>
   <div class="footer">Generated by Document Intelligence AI Workspace</div>
   </body></html>`;
 
   const blob = new Blob([html], { type: "text/html" });
-  const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, "_blank");
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank");
   if (win) win.addEventListener("load", () => setTimeout(() => win.print(), 400));
 }
 
 // ── Main App ────────────────────────────────────────────────
 export default function App() {
   // Upload state
-  const [file, setFile]             = useState(null);
+  const [file, setFile] = useState(null);
   const [manualText, setManualText] = useState("");
-  const [inputMode, setInputMode]   = useState("file"); // "file" | "text"
-  const [dragOver, setDragOver]     = useState(false);
+  const [inputMode, setInputMode] = useState("file"); // "file" | "text"
+  const [dragOver, setDragOver] = useState(false);
 
   // Result + UI state
-  const [result, setResult]         = useState(null);
-  const [loading, setLoading]       = useState(false);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("Analyzing document…");
-  const [chatOpen, setChatOpen]     = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   // Chat state
   const [chatLoading, setChatLoading] = useState(false);
-  const [sessions, setSessions]       = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
-  const [messages, setMessages]         = useState([]);
-  const [question, setQuestion]         = useState("");
+  const [messages, setMessages] = useState([]);
+  const [question, setQuestion] = useState("");
 
   // Layout
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [mobileOpen, setMobileOpen]   = useState(false);
-  const [toast, setToast]             = useState(null);
-  const [theme, setTheme]             = useState(() => localStorage.getItem("theme") || "light");
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
 
   // Session management
-  const [ctxMenu, setCtxMenu]     = useState(null);
-  const [renaming, setRenaming]   = useState(null);
+  const [ctxMenu, setCtxMenu] = useState(null);
+  const [renaming, setRenaming] = useState(null);
   const [renameVal, setRenameVal] = useState("");
   const [confirmDel, setConfirmDel] = useState(null);
 
   const msgEndRef = useRef(null);
   const renameRef = useRef(null);
-  const fileRef   = useRef(null);
-  const isDark    = theme === "dark";
+  const fileRef = useRef(null);
+  const isDark = theme === "dark";
 
   useEffect(() => {
     localStorage.setItem("theme", theme);
@@ -175,7 +196,7 @@ export default function App() {
   // ── API ────────────────────────────────────────────────────
   const loadSessions = useCallback(async () => {
     try {
-      const r = await fetch(`${BASE_URL}/chat/sessions`);
+      const r = await apiFetch(`${BASE_URL}/chat/sessions`);
       if (!r.ok) throw 0;
       const d = await r.json();
       setSessions(d.sessions || []);
@@ -191,22 +212,21 @@ export default function App() {
     return () => document.removeEventListener("click", fn);
   }, []);
 
-  const createSession = async () => {
-    try {
-      const r = await fetch(`${BASE_URL}/chat/new-session`, { method: "POST" });
-      if (!r.ok) throw 0;
-      const d = await r.json();
-      setActiveSession(d.session_id);
-      setMessages([]);
-      await loadSessions();
-      setMobileOpen(false);
-      return d.session_id;
-    } catch { toast$("Failed to create session.", "error"); }
+  // "New Analysis" — just resets the UI back to the upload screen.
+  // A real session is created automatically when a document is uploaded.
+  const newAnalysis = () => {
+    setActiveSession(null);
+    setMessages([]);
+    setResult(null);
+    setFile(null);
+    setManualText("");
+    setChatOpen(false);
+    setMobileOpen(false);
   };
 
   const loadHistory = async (sid) => {
     try {
-      const r = await fetch(`${BASE_URL}/chat/history/${sid}`);
+      const r = await apiFetch(`${BASE_URL}/chat/history/${sid}`);
       if (!r.ok) throw 0;
       const d = await r.json();
       setActiveSession(sid);
@@ -219,7 +239,7 @@ export default function App() {
 
   const renameSession = async (sid, newTitle) => {
     try {
-      await fetch(`${BASE_URL}/chat/session/${sid}/rename?title=${encodeURIComponent(newTitle)}`, {
+      await apiFetch(`${BASE_URL}/chat/session/${sid}/rename?title=${encodeURIComponent(newTitle)}`, {
         method: "PATCH",
       });
       await loadSessions();
@@ -231,7 +251,7 @@ export default function App() {
 
   const deleteSession = async (sid) => {
     try {
-      await fetch(`${BASE_URL}/chat/session/${sid}`, { method: "DELETE" });
+      await apiFetch(`${BASE_URL}/chat/session/${sid}`, { method: "DELETE" });
     } catch {
       toast$("Failed to delete session on server; removed locally.", "error");
     }
@@ -242,39 +262,47 @@ export default function App() {
   };
 
   // ── Upload / Analyze ───────────────────────────────────────
-  const handleUpload = async () => {
-    if (inputMode === "file" && !file) return toast$("Please select a PDF or DOCX file.", "warning");
+  // Each upload always creates a fresh session automatically —
+  // the session_id is returned by the backend and set as the active session.
+  const handleUpload = async (overrideFile = null) => {
+    const uploadFile = overrideFile || file;
+    if (inputMode === "file" && !uploadFile) return toast$("Please select a PDF or DOCX file.", "warning");
     if (inputMode === "text" && !manualText.trim()) return toast$("Please paste some text to analyze.", "warning");
 
     setLoading(true);
     setLoadingMsg("Reading your document…");
+    // Reset to fresh state for the new document
+    setMessages([]);
+    setResult(null);
+    setChatOpen(false);
+
     try {
       const msgs = ["Reading your document…", "Extracting insights…", "Identifying deadlines…", "Detecting compliance needs…", "Almost done…"];
       let mi = 0;
       const timer = setInterval(() => { mi = (mi + 1) % msgs.length; setLoadingMsg(msgs[mi]); }, 1800);
 
-      // Ensure a session exists so backend can auto-name it
-      let sid = activeSession;
-      if (!sid) { sid = await createSession(); }
-
       let r;
       if (inputMode === "file") {
         const fd = new FormData();
-        fd.append("file", file);
-        r = await fetch(`${BASE_URL}/rfp/upload?session_id=${sid}`, { method: "POST", body: fd });
+        fd.append("file", uploadFile);
+        // No session_id — backend auto-creates one for this document
+        r = await apiFetch(`${BASE_URL}/rfp/upload`, { method: "POST", body: fd });
       } else {
-        r = await fetch(`${BASE_URL}/rfp/analyze-text`, {
+        r = await apiFetch(`${BASE_URL}/rfp/analyze-text`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: manualText, session_id: sid }),
+          body: JSON.stringify({ text: manualText }),
         });
       }
       clearInterval(timer);
       if (!r.ok) throw 0;
       const data = await r.json();
+
+      // Use the session_id the backend created for this document
+      const newSid = data.session_id;
+      setActiveSession(newSid);
       setResult(data);
-      setChatOpen(false); // start fresh — user decides when to open chat
-      if (!activeSession) await createSession();
+      await loadSessions();
       toast$("Document analyzed successfully!", "success");
     } catch { toast$("Failed to analyze document.", "error"); }
     finally { setLoading(false); }
@@ -288,7 +316,7 @@ export default function App() {
     setQuestion("");
     setChatLoading(true);
     try {
-      const r = await fetch(`${BASE_URL}/chat/ask?question=${encodeURIComponent(q)}&session_id=${activeSession}`, { method: "POST" });
+      const r = await apiFetch(`${BASE_URL}/chat/ask?question=${encodeURIComponent(q)}&session_id=${activeSession}`, { method: "POST" });
       if (!r.ok) throw 0;
       const d = await r.json();
       setMessages(p => [...p, { role: "assistant", content: d.answer }]);
@@ -305,7 +333,7 @@ export default function App() {
   };
 
   const activeTitle = sessions.find(s => s.session_id === activeSession)?.title || "Analysis Workspace";
-  const flashData   = result?.final_extracted_data || null;
+  const flashData = result?.final_extracted_data || null;
 
   const openCtx = (e, session) => {
     e.preventDefault(); e.stopPropagation();
@@ -331,20 +359,20 @@ export default function App() {
         <div className="modal-bg" onClick={() => setConfirmDel(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div
-  style={{
-    width:48,
-    height:48,
-    borderRadius:"50%",
-    background:"rgba(239,68,68,.12)",
-    color:"#ef4444",
-    display:"flex",
-    alignItems:"center",
-    justifyContent:"center",
-    marginBottom:8
-  }}
->
-  <I.Trash />
-</div>
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "rgba(239,68,68,.12)",
+                color: "#ef4444",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 8
+              }}
+            >
+              <I.Trash />
+            </div>
             <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, marginBottom: 6 }}>Delete session?</div>
             <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>
               This will permanently remove the chat history. This cannot be undone.
@@ -377,16 +405,16 @@ export default function App() {
         <div className="sb-logo">
           <div className="sb-logo-icon">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="16" y1="13" x2="8" y2="13" />
+              <line x1="16" y1="17" x2="8" y2="17" />
             </svg>
           </div>
           {sidebarOpen && <div><div className="sb-name">AI Document Intelligence</div><div className="sb-sub">AI Workspace</div></div>}
         </div>
 
-        <button className="sb-new" onClick={createSession}>
+        <button className="sb-new" onClick={newAnalysis}>
           <I.Plus />{sidebarOpen && <span>New Analysis</span>}
         </button>
 
@@ -398,28 +426,28 @@ export default function App() {
               <div key={s.session_id} className={cx("sb-item-wrap", activeSession === s.session_id && "active")}>
                 {renaming === s.session_id
                   ? <form className="rename-form" onSubmit={e => {
-                      e.preventDefault();
-                      renameSession(s.session_id, renameVal || s.title || "Untitled");
-                      setRenaming(null);
-                    }}>
-                      <input ref={renameRef} className="rename-input" value={renameVal}
-                        onChange={e => setRenameVal(e.target.value)}
-                        onBlur={() => { renameSession(s.session_id, renameVal || s.title || "Untitled"); setRenaming(null); }}
-                        onKeyDown={e => e.key === "Escape" && setRenaming(null)} />
-                    </form>
+                    e.preventDefault();
+                    renameSession(s.session_id, renameVal || s.title || "Untitled");
+                    setRenaming(null);
+                  }}>
+                    <input ref={renameRef} className="rename-input" value={renameVal}
+                      onChange={e => setRenameVal(e.target.value)}
+                      onBlur={() => { renameSession(s.session_id, renameVal || s.title || "Untitled"); setRenaming(null); }}
+                      onKeyDown={e => e.key === "Escape" && setRenaming(null)} />
+                  </form>
                   : <>
-                      <button className="sb-item" onClick={() => loadHistory(s.session_id)}>
-                        <div className="sb-item-icon"><I.Msg /></div>
-                        {sidebarOpen && <span className="sb-item-title">{s.title || "Untitled Session"}</span>}
+                    <button className="sb-item" onClick={() => loadHistory(s.session_id)}>
+                      <div className="sb-item-icon"><I.Msg /></div>
+                      {sidebarOpen && <span className="sb-item-title">{s.title || "Untitled Session"}</span>}
+                    </button>
+                    {sidebarOpen && (
+                      <button className="sb-more" onClick={e => openCtx(e, s)} title="Options">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
+                        </svg>
                       </button>
-                      {sidebarOpen && (
-                        <button className="sb-more" onClick={e => openCtx(e, s)} title="Options">
-                          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="5" cy="12" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="19" cy="12" r="1.5" />
-                          </svg>
-                        </button>
-                      )}
-                    </>
+                    )}
+                  </>
                 }
               </div>
             ))
@@ -442,15 +470,15 @@ export default function App() {
             <div className="header-title">
               {activeSession
                 ? <><span style={{ color: "var(--text-secondary)" }}>AI Document Intelligence</span>
-                    <span style={{ color: "var(--border)", margin: "0 4px" }}><I.ChevR /></span>
-                    <span>{activeTitle}</span></>
+                  <span style={{ color: "var(--border)", margin: "0 4px" }}><I.ChevR /></span>
+                  <span>{activeTitle}</span></>
                 : <>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
-                    </svg>
-                    AI Document Intelligence
-                  </>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  AI Document Intelligence
+                </>
               }
             </div>
           </div>
@@ -557,7 +585,7 @@ export default function App() {
 
                   {/* Analyze button */}
                   {((inputMode === "file" && file) || (inputMode === "text" && manualText.trim().length > 0)) && !loading && (
-                    <button className="btn-analyze" onClick={handleUpload}>
+                    <button className="btn-analyze" onClick={() => handleUpload()}>
                       Analyze Document →
                     </button>
                   )}
@@ -580,8 +608,8 @@ export default function App() {
                 <div className="results-meta">
                   <div className="results-title-row">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
+                      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
                     </svg>
                     <span className="results-title">
                       {file ? file.name : "Pasted Text"}
@@ -606,16 +634,26 @@ export default function App() {
                   )}
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {/* Re-upload strip */}
+                  {/* Re-upload strip — uploading a new file creates a fresh session */}
                   <div className={cx("strip-dropzone-sm", dragOver && "drag-over")}
                     onDragOver={e => { e.preventDefault(); setDragOver(true); }}
                     onDragLeave={() => setDragOver(false)}
-                    onDrop={handleDrop}
+                    onDrop={e => {
+                      e.preventDefault(); setDragOver(false);
+                      const f = e.dataTransfer.files[0];
+                      if (f && (f.name.endsWith(".pdf") || f.name.endsWith(".docx"))) {
+                        setFile(f); setInputMode("file");
+                        handleUpload(f);
+                      } else toast$("Please drop a PDF or DOCX file.", "warning");
+                    }}
                     onClick={() => fileRef.current?.click()}
                     title="Upload new document"
                   >
                     <input ref={fileRef} type="file" accept=".pdf,.docx" style={{ display: "none" }}
-                      onChange={e => { setFile(e.target.files[0]); setInputMode("file"); }} />
+                      onChange={e => {
+                        const f = e.target.files[0];
+                        if (f) { setFile(f); setInputMode("file"); handleUpload(f); }
+                      }} />
                     {loading ? <><I.Spin /><span>Analyzing…</span></> : <><I.Upload /><span>New file</span></>}
                   </div>
 
@@ -627,129 +665,133 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ── Document Report — clean text sections ── */}
+              {/* ── Document Report ── */}
               <div className="doc-report">
 
-                {/* Summary */}
-                {flashData?.executive_summary && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Summary</h2>
-                    <p className="doc-section-prose">{flashData.executive_summary}</p>
-                  </div>
-                )}
+                {/* Summary — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Summary</h2>
+                  {flashData?.executive_summary
+                    ? <p className="doc-section-prose">{flashData.executive_summary}</p>
+                    : <p className="doc-empty">Not found in this document.</p>
+                  }
+                </div>
 
-                {/* Objectives */}
-                {flashData?.objectives?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Objectives</h2>
-                    <ul className="doc-list">
-                      {flashData.objectives.map((item, i) => (
+                {/* Objectives — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Objectives</h2>
+                  {flashData?.objectives?.length > 0
+                    ? <ul className="doc-list">{flashData.objectives.map((item, i) => (
                         <li key={i}>{typeof item === "string" ? item : item.item || JSON.stringify(item)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">None found.</p>
+                  }
+                </div>
 
-                {/* Scope of Work */}
-                {flashData?.project_scope?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Scope of Work</h2>
-                    <ul className="doc-list">
-                      {flashData.project_scope.map((item, i) => (
+                {/* Key Highlights — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Key Highlights</h2>
+                  {flashData?.key_highlights?.length > 0
+                    ? <ul className="doc-list">{flashData.key_highlights.map((item, i) => (
+                        <li key={i}>{typeof item === "string" ? item : item.item || JSON.stringify(item)}</li>
+                      ))}</ul>
+                    : <p className="doc-empty">None found.</p>
+                  }
+                </div>
+
+                {/* Scope of Work — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Scope of Work</h2>
+                  {flashData?.project_scope?.length > 0
+                    ? <ul className="doc-list">{flashData.project_scope.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : item.item || JSON.stringify(item)}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No scope items detected in this document.</p>
+                  }
+                </div>
 
-                {/* Deliverables */}
-                {flashData?.deliverables?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Deliverables</h2>
-                    <ul className="doc-list">
-                      {flashData.deliverables.map((item, i) => (
+                {/* Deliverables — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Deliverables</h2>
+                  {flashData?.deliverables?.length > 0
+                    ? <ul className="doc-list">{flashData.deliverables.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : item.item || JSON.stringify(item)}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No deliverables detected.</p>
+                  }
+                </div>
 
-                {/* Technical Requirements */}
-                {flashData?.technical_requirements?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Technical Requirements</h2>
-                    <ul className="doc-list">
-                      {flashData.technical_requirements.map((item, i) => (
+                {/* Technical Requirements — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Technical Requirements</h2>
+                  {flashData?.technical_requirements?.length > 0
+                    ? <ul className="doc-list">{flashData.technical_requirements.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : item.item || JSON.stringify(item)}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No technical requirements detected.</p>
+                  }
+                </div>
 
-                {/* Commercial Requirements */}
-                {flashData?.commercial_requirements?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Commercial Requirements</h2>
-                    <ul className="doc-list">
-                      {flashData.commercial_requirements.map((item, i) => (
+                {/* Commercial Requirements — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Commercial Requirements</h2>
+                  {flashData?.commercial_requirements?.length > 0
+                    ? <ul className="doc-list">{flashData.commercial_requirements.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : item.item || JSON.stringify(item)}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No commercial requirements detected.</p>
+                  }
+                </div>
 
-                {/* Deadlines */}
-                {flashData?.deadlines?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Key Deadlines &amp; Milestones</h2>
-                    <ul className="doc-list">
-                      {flashData.deadlines.map((item, i) => (
+                {/* Deadlines — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Key Deadlines &amp; Milestones</h2>
+                  {flashData?.deadlines?.length > 0
+                    ? <ul className="doc-list">{flashData.deadlines.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : (
                             <>{item.event}{item.date && <strong> — {item.date}</strong>}</>
                           )}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No deadlines or milestones detected.</p>
+                  }
+                </div>
 
-                {/* Staffing */}
-                {flashData?.staffing_requirements?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Staffing Requirements</h2>
-                    <ul className="doc-list">
-                      {flashData.staffing_requirements.map((item, i) => (
+                {/* Staffing — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Staffing Requirements</h2>
+                  {flashData?.staffing_requirements?.length > 0
+                    ? <ul className="doc-list">{flashData.staffing_requirements.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : (
                             <>{item.role && <strong>{item.role}: </strong>}{item.details || item.item || ""}</>
                           )}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No staffing requirements detected.</p>
+                  }
+                </div>
 
-                {/* Risks */}
-                {flashData?.risks?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Risks</h2>
-                    <ul className="doc-list">
-                      {flashData.risks.map((item, i) => (
+                {/* Risks — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Risks</h2>
+                  {flashData?.risks?.length > 0
+                    ? <ul className="doc-list">{flashData.risks.map((item, i) => (
                         <li key={i}>
                           {typeof item === "string" ? item : (
                             <>
@@ -763,61 +805,51 @@ export default function App() {
                           )}
                           {item.page_ref && item.page_ref !== "N/A" && <span className="pg-ref">{item.page_ref}</span>}
                         </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                      ))}</ul>
+                    : <p className="doc-empty">No risks detected.</p>
+                  }
+                </div>
 
-                {/* Compliance Table */}
-                {flashData?.compliance_requirements?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Compliance Requirements</h2>
-                    <div className="compliance-table-wrap">
-                      <table className="compliance-table">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>Requirement</th>
-                            <th>Category</th>
-                            <th>Page</th>
-                            <th>Mandatory</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {flashData.compliance_requirements.map((item, i) => (
-                            <tr key={i}>
-                              <td className="col-num">{i + 1}</td>
-                              <td>{typeof item === "string" ? item : item.requirement || item.item || ""}</td>
-                              <td>{item.category || "—"}</td>
-                              <td>{item.page_ref && item.page_ref !== "N/A" ? item.page_ref : "—"}</td>
-                              <td>
-                                {item.mandatory === true
-                                  ? <span className="mandatory-yes">✓ Yes</span>
-                                  : item.mandatory === false
-                                  ? <span className="mandatory-no">No</span>
-                                  : "—"}
-                              </td>
+                {/* Compliance Table — always show */}
+                <div className="doc-section">
+                  <h2 className="doc-section-heading">Compliance Requirements</h2>
+                  {flashData?.compliance_requirements?.length > 0
+                    ? <div className="compliance-table-wrap">
+                        <table className="compliance-table">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>Requirement</th>
+                              <th>Category</th>
+                              <th>Page</th>
+                              <th>Mandatory</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* Key Highlights */}
-                {flashData?.key_highlights?.length > 0 && (
-                  <div className="doc-section">
-                    <h2 className="doc-section-heading">Key Highlights</h2>
-                    <ul className="doc-list">
-                      {flashData.key_highlights.map((item, i) => (
-                        <li key={i}>{typeof item === "string" ? item : item.item || JSON.stringify(item)}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                          </thead>
+                          <tbody>
+                            {flashData.compliance_requirements.map((item, i) => (
+                              <tr key={i}>
+                                <td className="col-num">{i + 1}</td>
+                                <td>{typeof item === "string" ? item : item.requirement || item.item || ""}</td>
+                                <td>{item.category || "—"}</td>
+                                <td>{item.page_ref && item.page_ref !== "N/A" ? item.page_ref : "—"}</td>
+                                <td>
+                                  {item.mandatory === true
+                                    ? <span className="mandatory-yes">✓ Yes</span>
+                                    : item.mandatory === false
+                                      ? <span className="mandatory-no">No</span>
+                                      : "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    : <p className="doc-empty">No compliance requirements detected.</p>
+                  }
+                </div>
 
               </div>{/* end doc-report */}
+
 
               {/* PDF report button */}
               <div className="report-row">
@@ -848,27 +880,27 @@ export default function App() {
                   <div className="msgs">
                     {messages.length === 0
                       ? <div className="msgs-empty">
-                          <div className="msgs-empty-icon"><I.Msg /></div>
-                          <h4>Ask anything about this document</h4>
-                          <p>Deadlines, compliance, scope, risks — ask away.</p>
-                          <div className="chips">
-                            {["Summarize key requirements", "What are the deadlines?", "List compliance needs", "Identify main risks"].map(q => (
-                              <button key={q} className="chip" onClick={() => setQuestion(q)}>{q}</button>
-                            ))}
+                        <div className="msgs-empty-icon"><I.Msg /></div>
+                        <h4>Ask anything about this document</h4>
+                        <p>Deadlines, compliance, scope, risks — ask away.</p>
+                        <div className="chips">
+                          {["Summarize key requirements", "What are the deadlines?", "List compliance needs", "Identify main risks"].map(q => (
+                            <button key={q} className="chip" onClick={() => setQuestion(q)}>{q}</button>
+                          ))}
+                        </div>
+                      </div>
+                      : messages.map((m, i) => (
+                        <div key={i} className={cx("msg-row", m.role === "user" && "user")}>
+                          <div className={cx("msg-av", m.role === "assistant" ? "bot" : "usr")}>
+                            {m.role === "assistant" ? <I.Bot /> : <I.User />}
+                          </div>
+                          <div className={cx("bubble", m.role === "user" ? "ubub" : "bbub")}>
+                            {m.role === "assistant"
+                              ? <div className="prose"><ReactMarkdown>{m.content}</ReactMarkdown></div>
+                              : m.content}
                           </div>
                         </div>
-                      : messages.map((m, i) => (
-                          <div key={i} className={cx("msg-row", m.role === "user" && "user")}>
-                            <div className={cx("msg-av", m.role === "assistant" ? "bot" : "usr")}>
-                              {m.role === "assistant" ? <I.Bot /> : <I.User />}
-                            </div>
-                            <div className={cx("bubble", m.role === "user" ? "ubub" : "bbub")}>
-                              {m.role === "assistant"
-                                ? <div className="prose"><ReactMarkdown>{m.content}</ReactMarkdown></div>
-                                : m.content}
-                            </div>
-                          </div>
-                        ))
+                      ))
                     }
                     {chatLoading && (
                       <div className="typing-row">
@@ -1451,5 +1483,15 @@ const CSS = `
 }
 .compliance-table .mandatory-no {
   color: var(--text-secondary);
+}
+.doc-empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 4px 0 0 0;
+  padding: 8px 12px;
+  background: var(--bg);
+  border-radius: var(--rsm);
+  border-left: 3px solid var(--border);
 }
 `;

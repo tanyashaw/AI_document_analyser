@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Header
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -59,17 +59,22 @@ def _build_final_response(workflow_result: dict) -> dict:
     }
 
 
-def _ensure_session(session_id: Optional[str]) -> str:
+def _ensure_session(session_id: Optional[str], user_id: str) -> str:
     """
     Guarantee we always have a session_id to scope vector store chunks to.
     If the caller didn't provide one, create a fresh chat session and use
     that ID so chunks and future chat retrieval line up automatically.
+    Raises 403 if the caller tries to upload into a session owned by
+    a different user.
     """
     if session_id and session_id in session_store:
+        owner = session_store.get_owner(session_id)
+        if owner is not None and owner != user_id:
+            raise HTTPException(status_code=403, detail="This session belongs to another user.")
         return session_id
 
     new_session_id = session_id or str(uuid4())
-    session_store.create_session(new_session_id)
+    session_store.create_session(new_session_id, user_id=user_id)
     return new_session_id
 
 
@@ -125,8 +130,9 @@ def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
 async def upload_rfp(
     file: UploadFile = File(...),
     session_id: Optional[str] = None,
+    x_user_id: str = Header(...),
 ):
-    session_id = _ensure_session(session_id)
+    session_id = _ensure_session(session_id, x_user_id)
 
     file_path = UPLOAD_DIR / file.filename
 
@@ -146,8 +152,8 @@ async def upload_rfp(
 
 
 @router.post("/analyze-text")
-async def process_text_rfp(request: TextRFPRequest):
-    session_id = _ensure_session(request.session_id)
+async def process_text_rfp(request: TextRFPRequest, x_user_id: str = Header(...)):
+    session_id = _ensure_session(request.session_id, x_user_id)
 
     meta, workflow_result = process_rfp_text(request.text, session_id=session_id)
 
