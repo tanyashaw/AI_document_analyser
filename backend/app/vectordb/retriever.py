@@ -1,5 +1,5 @@
-from app.vectordb.embedder import embedding_model
-from app.vectordb.chroma_client import collection
+from app.vectordb.embedder import embed_query
+from app.vectordb.chroma_client import get_collection
 
 
 def retrieve_relevant_chunks(query, session_id: str, top_k=3):
@@ -12,9 +12,9 @@ def retrieve_relevant_chunks(query, session_id: str, top_k=3):
     if not session_id:
         raise ValueError("retrieve_relevant_chunks requires a session_id")
 
-    query_embedding = embedding_model.encode(query).tolist()
+    query_embedding = embed_query(query)
 
-    results = collection.query(
+    results = get_collection().query(
         query_embeddings=[query_embedding],
         n_results=top_k,
         where={"session_id": session_id},

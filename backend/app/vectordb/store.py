@@ -1,7 +1,7 @@
 import uuid
 
-from app.vectordb.embedder import embedding_model
-from app.vectordb.chroma_client import collection
+from app.vectordb.embedder import embed_texts
+from app.vectordb.chroma_client import get_collection
 
 
 def store_chunks(chunks, session_id: str):
@@ -22,16 +22,17 @@ def store_chunks(chunks, session_id: str):
 
     upload_tag = uuid.uuid4().hex[:8]
 
-    # Batch encode all chunks at once — much faster than one-by-one
-    embeddings = embedding_model.encode(chunks, show_progress_bar=False).tolist()
+    # Batch-embed all chunks in a single hosted API call — much faster than
+    # one-by-one, and avoids loading any model locally.
+    embeddings = embed_texts(chunks)
 
     ids = [f"{session_id}_{upload_tag}_{i}" for i in range(len(chunks))]
     metadatas = [{"session_id": session_id} for _ in chunks]
 
     # Single bulk insert instead of N individual adds
-    collection.add(
+    get_collection().add(
         ids=ids,
         documents=chunks,
         embeddings=embeddings,
         metadatas=metadatas,
-    )
+    )

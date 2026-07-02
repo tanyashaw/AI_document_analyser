@@ -22,3 +22,23 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# ==========================
+# Python / FastAPI
+# ==========================
+
+# Virtual environment
+backend/venv/
+
+# Environment variables
+backend/.env
+
+# Python cache
+backend/__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Uploads (optional - don't commit uploaded files)
+backend/uploads/
+
+# Chroma DB (optional - don't commit generated vector DB)
+backend/chroma_db/
