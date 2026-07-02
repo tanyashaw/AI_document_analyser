@@ -43,6 +43,7 @@ async def get_chat_history(session_id: str):
         "messages": session_store.get_messages(session_id),
         "title": session_store.get_title(session_id),
         "doc_name": session_store.get_doc_name(session_id),
+        "analysis": session_store.get_analysis(session_id),
     }
 
 

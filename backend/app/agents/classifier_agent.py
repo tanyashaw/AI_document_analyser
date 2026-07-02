@@ -19,7 +19,9 @@ DOCUMENT_TYPES = [
 
 def classifier_agent(state):
 
-    text = state["text"]
+    # Document type is almost always evident from the opening of the doc;
+    # no need to burn tokens sending the whole thing to this call.
+    text = state["text"][:2000]
 
     prompt = f"""
     You are a document classification expert.
@@ -56,7 +58,8 @@ def classifier_agent(state):
             }
         ],
 
-        temperature=0
+        temperature=0,
+        max_tokens=150,  # this response is a small fixed-shape JSON object
     )
 
     content = response.choices[0].message.content

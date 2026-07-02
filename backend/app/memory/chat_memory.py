@@ -105,6 +105,19 @@ class _SessionStore:
     def get_doc_name(self, session_id: str) -> str | None:
         return self._data.get(session_id, {}).get("doc_name")
 
+    # ── Analysis results ──────────────────────────────────────
+
+    def set_analysis(self, session_id: str, analysis: dict) -> None:
+        """Persist the final_extracted_data for a session so it can be
+        restored when the user reopens the session later."""
+        if session_id not in self._data:
+            self.create_session(session_id)
+        self._data[session_id]["analysis"] = analysis
+        _save(self._data)
+
+    def get_analysis(self, session_id: str) -> dict | None:
+        return self._data.get(session_id, {}).get("analysis")
+
 
 # Singleton — imported everywhere
 session_store = _SessionStore()

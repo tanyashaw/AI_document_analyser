@@ -30,7 +30,7 @@ class TextRFPRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-MAX_ANALYSIS_CHARS = 24000  # keep agent prompts within a safe context budget
+MAX_ANALYSIS_CHARS = 8000  # keep agent prompts within a safe context budget (this text is re-sent to ~10 separate LLM calls, so keeping it small matters a lot for token budget)
 
 
 def _build_final_response(workflow_result: dict) -> dict:
@@ -106,6 +106,9 @@ def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
 
     workflow_result = app_graph.invoke(initial_state)
     final_response = _build_final_response(workflow_result)
+
+    # Persist so the analysis is restored when the user reopens this session
+    session_store.set_analysis(session_id, final_response)
 
     meta = {
         "total_characters": len(text),

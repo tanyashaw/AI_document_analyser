@@ -96,6 +96,7 @@ def summary_agent(state):
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
+        max_tokens=800,  # needs more room than extraction agents since it writes prose
     )
 
     content = response.choices[0].message.content

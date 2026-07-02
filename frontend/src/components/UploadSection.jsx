@@ -2,8 +2,6 @@ import { useState } from "react";
 
 function UploadSection({
 
-  file,
-
   setFile,
 
   textInput,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 
 const BASE_URL = "http://localhost:8000";
@@ -39,203 +39,6 @@ const I = {
 };
 
 const cx = (...a) => a.filter(Boolean).join(" ");
-
-// ── Flashcard configs ───────────────────────────────────────
-const CARDS = [
-  { key: "objectives", label: "Objectives", Icon: I.Target, grad: ["#22c55e","#16a34a"], accent: "#22c55e" },
-  { key: "project_scope", label: "Scope of Work", Icon: I.Target, grad: ["#FF6B35","#FF9F5A"], accent: "#FF6B35" },
-  { key: "deadlines", label: "Deadlines", Icon: I.Clock, grad: ["#4ECDC4","#2BB8AE"], accent: "#4ECDC4" },
-  { key: "staffing_requirements", label: "Staffing", Icon: I.User, grad: ["#60A5FA","#3B82F6"], accent: "#60A5FA" },
-  { key: "compliance_requirements", label: "Compliance", Icon: I.Shield, grad: ["#A78BFA","#7C3AED"], accent: "#A78BFA" },
-  { key: "key_highlights", label: "Key Highlights", Icon: I.Alert, grad: ["#F59E0B","#EF4444"], accent: "#F59E0B" },
-];
-
-// ── Helper: render a page-ref badge ─────────────────────────
-function PageRef({ ref: pg, accent }) {
-  if (!pg || pg === "N/A") return null;
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", gap: 3,
-      background: `${accent}22`, border: `1px solid ${accent}44`,
-      color: accent, borderRadius: 6, fontSize: 9.5, fontWeight: 700,
-      padding: "1px 5px", flexShrink: 0, whiteSpace: "nowrap", marginTop: 1,
-    }}>
-      📄 {pg}
-    </span>
-  );
-}
-
-// ── Helper: render one item row regardless of string or object ─
-function ItemRow({ item, i, grad, bg, border, accent, isDark, cardKey }) {
-  const baseStyle = {
-    display: "flex", flexDirection: "column", gap: 4,
-    padding: "8px 9px", borderRadius: 8,
-    background: bg, border: `1px solid ${border}`,
-    fontSize: 12, lineHeight: 1.55,
-    color: isDark ? "rgba(255,255,255,0.82)" : "rgba(0,0,0,0.75)",
-  };
-  const numBadge = (
-    <span style={{
-      width: 18, height: 18, borderRadius: 5, background: grad,
-      color: "#fff", fontSize: 9, fontWeight: 700,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
-    }}>{i + 1}</span>
-  );
-
-  if (typeof item === "string") {
-    return (
-      <div key={i} style={baseStyle}>
-        <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-          {numBadge}<span>{item}</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Compliance: { requirement, category, page_ref, mandatory }
-  if (cardKey === "compliance_requirements") {
-    return (
-      <div key={i} style={baseStyle}>
-        <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-          {numBadge}
-          <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: 4 }}>{item.requirement || item.item || String(item)}</div>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-              {item.category && (
-                <span style={{ background: `${accent}15`, color: accent, borderRadius: 5, fontSize: 9.5, fontWeight: 700, padding: "1px 6px" }}>
-                  {item.category}
-                </span>
-              )}
-              {item.mandatory === true && (
-                <span style={{ background: "rgba(239,68,68,0.12)", color: "#ef4444", borderRadius: 5, fontSize: 9.5, fontWeight: 700, padding: "1px 6px" }}>
-                  Mandatory
-                </span>
-              )}
-              {item.mandatory === false && (
-                <span style={{ background: "rgba(34,197,94,0.1)", color: "#22c55e", borderRadius: 5, fontSize: 9.5, fontWeight: 700, padding: "1px 6px" }}>
-                  Optional
-                </span>
-              )}
-              <PageRef ref={item.page_ref} accent={accent} />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Deadlines: { event, date, page_ref }
-  if (cardKey === "deadlines") {
-    return (
-      <div key={i} style={baseStyle}>
-        <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-          {numBadge}
-          <div style={{ flex: 1 }}>
-            <div>{item.event || String(item)}</div>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 4 }}>
-              {item.date && (
-                <span style={{ background: `${accent}15`, color: accent, borderRadius: 5, fontSize: 9.5, fontWeight: 700, padding: "1px 6px" }}>
-                  📅 {item.date}
-                </span>
-              )}
-              <PageRef ref={item.page_ref} accent={accent} />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Staffing: { role, details, page_ref }
-  if (cardKey === "staffing_requirements") {
-    return (
-      <div key={i} style={baseStyle}>
-        <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-          {numBadge}
-          <div style={{ flex: 1 }}>
-            {item.role && <div style={{ fontWeight: 700, marginBottom: 2 }}>{item.role}</div>}
-            <div style={{ opacity: 0.85 }}>{item.details || item.item || String(item)}</div>
-            <div style={{ marginTop: 4 }}><PageRef ref={item.page_ref} accent={accent} /></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Scope: { item, page_ref }
-  return (
-    <div key={i} style={baseStyle}>
-      <div style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
-        {numBadge}
-        <div style={{ flex: 1 }}>
-          <div>{item.item || item.requirement || String(item)}</div>
-          <div style={{ marginTop: 4 }}><PageRef ref={item.page_ref} accent={accent} /></div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── InsightCard: flat, always-visible (no flip) ─────────────
-function InsightCard({ cfg, items, isDark }) {
-  const bg     = `${cfg.accent}12`;
-  const border = `${cfg.accent}30`;
-  const grad   = `linear-gradient(135deg, ${cfg.grad[0]}, ${cfg.grad[1]})`;
-
-  return (
-    <div style={{
-      background: isDark ? "var(--bg-card)" : "#fff",
-      border: `1.5px solid ${border}`,
-      borderRadius: 14,
-      overflow: "hidden",
-      display: "flex",
-      flexDirection: "column",
-    }}>
-      {/* Header strip */}
-      <div style={{
-        padding: "10px 13px",
-        background: grad,
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-      }}>
-        <div style={{
-          width: 24, height: 24, borderRadius: 6,
-          background: "rgba(255,255,255,.18)",
-          display: "flex", alignItems: "center", justifyContent: "center", color: "#fff",
-        }}>
-          <cfg.Icon />
-        </div>
-        <span style={{
-          fontFamily: "var(--font-display)",
-          fontSize: 11.5, fontWeight: 800, color: "#fff",
-          letterSpacing: ".08em", textTransform: "uppercase",
-        }}>{cfg.label}</span>
-        <span style={{
-          marginLeft: "auto", background: "rgba(255,255,255,0.25)",
-          color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 700, padding: "1px 7px",
-        }}>{items?.length || 0}</span>
-      </div>
-
-      {/* Items */}
-      <div style={{ padding: "10px 11px", display: "flex", flexDirection: "column", gap: 5 }}>
-        {items?.length > 0 ? items.map((item, i) => (
-          <ItemRow
-            key={i} item={item} i={i}
-            grad={grad} bg={bg} border={border} accent={cfg.accent}
-            isDark={isDark} cardKey={cfg.key}
-          />
-        )) : (
-          <div style={{
-            textAlign: "center", padding: "14px 10px",
-            color: "var(--text-secondary)", fontSize: 12,
-          }}>No items detected.</div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ── PDF Report generator ────────────────────────────────────
 function generatePDFReport(data, sessionTitle) {
@@ -364,7 +167,22 @@ export default function App() {
     document.body.style.cssText = `background:${isDark ? "#0d0d10" : "#f0ede6"};color:${isDark ? "#f2ede8" : "#1a1512"};margin:0;padding:0;`;
   }, [theme, isDark]);
 
-  useEffect(() => { loadSessions(); }, []);
+  const toast$ = useCallback((message, type = "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // ── API ────────────────────────────────────────────────────
+  const loadSessions = useCallback(async () => {
+    try {
+      const r = await fetch(`${BASE_URL}/chat/sessions`);
+      if (!r.ok) throw 0;
+      const d = await r.json();
+      setSessions(d.sessions || []);
+    } catch { toast$("Server unreachable. Ensure backend is running.", "error"); }
+  }, [toast$]);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
   useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, chatLoading]);
   useEffect(() => { if (renaming && renameRef.current) renameRef.current.focus(); }, [renaming]);
   useEffect(() => {
@@ -372,21 +190,6 @@ export default function App() {
     document.addEventListener("click", fn);
     return () => document.removeEventListener("click", fn);
   }, []);
-
-  const toast$ = (message, type = "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  };
-
-  // ── API ────────────────────────────────────────────────────
-  const loadSessions = async () => {
-    try {
-      const r = await fetch(`${BASE_URL}/chat/sessions`);
-      if (!r.ok) throw 0;
-      const d = await r.json();
-      setSessions(d.sessions || []);
-    } catch { toast$("Server unreachable. Ensure backend is running.", "error"); }
-  };
 
   const createSession = async () => {
     try {
@@ -408,7 +211,7 @@ export default function App() {
       const d = await r.json();
       setActiveSession(sid);
       setMessages(d.messages || []);
-      setResult(null);
+      setResult(d.analysis ? { final_extracted_data: d.analysis } : null);
       setChatOpen(true);
       setMobileOpen(false);
     } catch { toast$("Failed to load history.", "error"); }
@@ -420,14 +223,18 @@ export default function App() {
         method: "PATCH",
       });
       await loadSessions();
-    } catch { }
+    } catch {
+      toast$("Failed to rename session. Server unreachable.", "error");
+    }
     setSessions(prev => prev.map(s => s.session_id === sid ? { ...s, title: newTitle } : s));
   };
 
   const deleteSession = async (sid) => {
     try {
       await fetch(`${BASE_URL}/chat/session/${sid}`, { method: "DELETE" });
-    } catch { }
+    } catch {
+      toast$("Failed to delete session on server; removed locally.", "error");
+    }
     setSessions(prev => prev.filter(s => s.session_id !== sid));
     if (activeSession === sid) { setActiveSession(null); setMessages([]); setResult(null); setChatOpen(false); }
     setConfirmDel(null);
@@ -495,14 +302,6 @@ export default function App() {
     const f = e.dataTransfer.files[0];
     if (f && (f.name.endsWith(".pdf") || f.name.endsWith(".docx"))) { setFile(f); setInputMode("file"); }
     else toast$("Please drop a PDF or DOCX file.", "warning");
-  };
-
-  const openChat = async () => {
-    if (!activeSession) {
-      const sid = await createSession();
-      if (!sid) return;
-    }
-    setChatOpen(true);
   };
 
   const activeTitle = sessions.find(s => s.session_id === activeSession)?.title || "Analysis Workspace";

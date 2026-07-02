@@ -1,22 +1,4 @@
 {
-  "ebf6a80e-b0b2-4062-aa65-a04374f7d151": {
-    "title": "New Chat",
-    "messages": [],
-    "doc_name": null,
-    "doc_type": null
-  },
-  "ff7f7d68-565a-4f64-bf1b-313efef9ad60": {
-    "title": "New Chat",
-    "messages": [],
-    "doc_name": null,
-    "doc_type": null
-  },
-  "7a822ea0-da02-4aec-bb63-c133ba727f04": {
-    "title": "New Chat",
-    "messages": [],
-    "doc_name": null,
-    "doc_type": null
-  },
   "21db6f6d-ed78-4c30-b86b-04cdada4abd3": {
     "title": "New Chat",
     "messages": [],
@@ -90,6 +72,84 @@
     "doc_type": null
   },
   "0bec76c3-4975-47e1-946a-5eea9d20aec0": {
+    "title": "New Chat",
+    "messages": [],
+    "doc_name": null,
+    "doc_type": null
+  },
+  "bca56c01-d8d7-4f23-993a-e01e824840c0": {
+    "title": "New Chat",
+    "messages": [],
+    "doc_name": null,
+    "doc_type": null
+  },
+  "d9e6a79a-8823-4a8b-8b76-f5ef60b8f0fd": {
+    "title": "New Chat",
+    "messages": [],
+    "doc_name": null,
+    "doc_type": null
+  },
+  "8ee06ef2-0128-413f-a259-5b6a526f08f9": {
+    "title": "Request for Proposal (RFP): RFP_PHI Insurance Broker_3Aug2018_FINAL.pdf",
+    "messages": [],
+    "doc_name": "RFP_PHI Insurance Broker_3Aug2018_FINAL.pdf",
+    "doc_type": "Request for Proposal (RFP)"
+  },
+  "c8218fbd-c25d-4367-91df-0484b25ce3ce": {
+    "title": "Summarize key requirements",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Summarize key requirements"
+      },
+      {
+        "role": "assistant",
+        "content": "I'm ready to assist you with summarizing key requirements based on the provided document context. Please provide the document context, and I'll follow the guidelines to provide accurate and clear answers."
+      }
+    ],
+    "doc_name": null,
+    "doc_type": null
+  },
+  "9d7b5b4f-c2a5-44a9-8e8b-f99a03972bc6": {
+    "title": "Request for Proposal (RFP): RFP_PHI Insurance Broker_3Aug2018_FINAL.pdf",
+    "messages": [],
+    "doc_name": "RFP_PHI Insurance Broker_3Aug2018_FINAL.pdf",
+    "doc_type": "Request for Proposal (RFP)",
+    "analysis": {
+      "document_type": "RFP",
+      "document_type_label": "Request for Proposal (RFP)",
+      "document_type_confidence": "High",
+      "executive_summary": "",
+      "objectives": [],
+      "key_highlights": [],
+      "project_scope": [],
+      "deadlines": [
+        {
+          "event": "Submission of proposals",
+          "date": "N/A",
+          "page_ref": "Page 3"
+        }
+      ],
+      "staffing_requirements": [
+        {
+          "role": "Insurance Broker",
+          "details": "The selected firm and representative broker(s) will work directly with PHI’s Director of Operations and the headquarters team on insurance coverages, renewals, and claims. Applicants should bring a strong network of connections and contacts in the insurance market.",
+          "page_ref": "Page 2"
+        },
+        {
+          "role": "Director of Operations",
+          "details": "The selected firm and representative broker(s) will work directly with PHI’s Director of Operations and the headquarters team on insurance coverages, renewals, and claims.",
+          "page_ref": "Page 2"
+        }
+      ],
+      "compliance_requirements": [],
+      "deliverables": [],
+      "technical_requirements": [],
+      "commercial_requirements": [],
+      "risks": []
+    }
+  },
+  "a90894ba-40f7-40f4-9dc2-7de6ef24127b": {
     "title": "New Chat",
     "messages": [],
     "doc_name": null,
