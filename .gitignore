@@ -35,4 +35,4 @@ chroma_db/
 uploads/
 **/memory/*.json
 **/settings.json
-
+backend/app/db/*.db
