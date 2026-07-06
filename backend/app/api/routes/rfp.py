@@ -131,12 +131,20 @@ async def upload_rfp(
 
     if existing_doc is not None:
         document_id = existing_doc["document_id"]
-        # Check if chunks actually exist in ChromaDB for this document
+        # Check if chunks actually exist in ChromaDB and are correctly scoped to the user
         from app.vectordb.chroma_client import get_collection
         try:
             col = get_collection()
-            existing_chunks = col.get(where={"document_id": document_id}, limit=1)
-            has_chunks = bool(existing_chunks and existing_chunks.get("ids"))
+            existing_chunks = col.get(
+                where={"document_id": document_id},
+                limit=1,
+                include=["metadatas"],
+            )
+            has_chunks = False
+            if existing_chunks and existing_chunks.get("ids") and existing_chunks.get("metadatas"):
+                meta = existing_chunks["metadatas"][0]
+                if meta.get("user_id") == user_id:
+                    has_chunks = True
         except Exception:
             has_chunks = False
 
