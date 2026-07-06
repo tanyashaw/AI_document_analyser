@@ -224,10 +224,7 @@ function generatePDFReport(data, sessionTitle) {
 function MainApp({ onLogout, theme, setTheme }) {
   // Upload state
   const [file, setFile] = useState(null);
-  // Name of the originally-analyzed document, kept separate from `file`
-  // (which only holds the in-memory File object from the upload widget).
-  // This survives page loads and reopening a session from the sidebar,
-  // so the "Download Original" link always has something to point to.
+  // Name of the originally-analyzed document, kept separate from `file`.
   const [docFilename, setDocFilename] = useState(null);
   const [manualText, setManualText] = useState("");
   const [inputMode, setInputMode] = useState("file"); // "file" | "text"
@@ -287,7 +284,7 @@ function MainApp({ onLogout, theme, setTheme }) {
     return () => document.removeEventListener("click", fn);
   }, []);
 
-  // "New Analysis" — just resets the UI back to the upload screen.
+  // "New Analysis" — resets the UI back to the upload screen.
   // A real session is created automatically when a document is uploaded.
   const newAnalysis = () => {
     setActiveSession(null);
@@ -308,14 +305,12 @@ function MainApp({ onLogout, theme, setTheme }) {
       setActiveSession(sid);
       setMessages(d.messages || []);
       setResult(d.analysis ? { final_extracted_data: d.analysis } : null);
-      // The uploaded File object itself doesn't persist across reloads, but
-      // the filename does — pull it from whichever field the backend sends,
-      // falling back to the session title (which is usually the filename).
+      // Pull filename from history response or the sessions list.
       const session = sessions.find(s => s.session_id === sid);
       setFile(null);
       setDocFilename(
-        d.filename || d.file_name || d.original_filename || d.document_name ||
-        session?.filename || session?.file_name || session?.title || null
+        d.doc_name || d.filename || d.file_name ||
+        session?.doc_name || session?.filename || null
       );
       setChatOpen(true);
       setMobileOpen(false);
@@ -347,8 +342,6 @@ function MainApp({ onLogout, theme, setTheme }) {
   };
 
   // ── Upload / Analyze ───────────────────────────────────────
-  // Each upload always creates a fresh session automatically —
-  // the session_id is returned by the backend and set as the active session.
   const handleUpload = async (overrideFile = null) => {
     const uploadFile = overrideFile || file;
     if (inputMode === "file" && !uploadFile) return toast$("Please select a PDF or DOCX file.", "warning");
@@ -356,7 +349,6 @@ function MainApp({ onLogout, theme, setTheme }) {
 
     setLoading(true);
     setLoadingMsg("Reading your document…");
-    // Reset to fresh state for the new document
     setMessages([]);
     setResult(null);
     setChatOpen(false);
@@ -370,7 +362,6 @@ function MainApp({ onLogout, theme, setTheme }) {
       if (inputMode === "file") {
         const fd = new FormData();
         fd.append("file", uploadFile);
-        // No session_id — backend auto-creates one for this document
         r = await apiFetch(`${BASE_URL}/rfp/upload`, { method: "POST", body: fd });
       } else {
         r = await apiFetch(`${BASE_URL}/rfp/analyze-text`, {
@@ -383,9 +374,7 @@ function MainApp({ onLogout, theme, setTheme }) {
       if (!r.ok) throw 0;
       const data = await r.json();
 
-      // Use the session_id the backend created for this document
-      const newSid = data.session_id;
-      setActiveSession(newSid);
+      setActiveSession(data.session_id);
       setResult(data);
       setDocFilename(inputMode === "file" ? uploadFile.name : null);
       await loadSessions();

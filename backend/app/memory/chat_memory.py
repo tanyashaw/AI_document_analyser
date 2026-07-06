@@ -1,173 +1,286 @@
+"""
+PGSessionStore — PostgreSQL-backed replacement for the old JSON file store.
+
+The old implementation (_SessionStore backed by sessions.json) stored
+everything in a local file, which meant data was lost whenever the app ran
+on a different machine or restarted on a stateless host.  This module
+replaces it with direct Postgres queries through the shared get_db()
+context manager so all data is stored in Supabase and is accessible from
+any environment.
+
+Public interface is intentionally similar to the old store so call sites in
+rfp.py and chat.py need minimal changes.  The backward-compat proxy classes
+(_MessagesProxy, _TitlesProxy) have been removed — callers now use the store
+methods directly.
+"""
+
+from __future__ import annotations
+
 import json
-import os
-from pathlib import Path
+from uuid import uuid4
 
-# Path to the persistence file (lives next to this module)
-_SESSIONS_FILE = Path(__file__).parent / "sessions.json"
+from app.db.database import get_db, USING_POSTGRES
 
 
-def _load() -> dict:
-    """Load sessions from disk. Returns empty dict if file doesn't exist."""
-    if _SESSIONS_FILE.exists():
-        try:
-            with open(_SESSIONS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+class PGSessionStore:
+    """All chat/document persistence, backed by PostgreSQL (or SQLite locally)."""
+
+    # ── Documents ─────────────────────────────────────────────────────────
+
+    def create_document(
+        self,
+        user_id: str,
+        filename: str,
+        doc_type: str | None = None,
+    ) -> str:
+        """Insert a document record and return its new document_id."""
+        doc_id = str(uuid4())
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO documents (id, user_id, filename, doc_type) VALUES (?, ?, ?, ?)",
+                (doc_id, user_id, filename, doc_type),
+            )
+        return doc_id
+
+    def set_document_analysis(self, document_id: str, analysis: dict) -> None:
+        """Persist the extracted analysis JSON for a document."""
+        blob = json.dumps(analysis, ensure_ascii=False)
+        with get_db() as conn:
+            if USING_POSTGRES:
+                conn.execute(
+                    "UPDATE documents SET analysis = ?::jsonb WHERE id = ?",
+                    (blob, document_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE documents SET analysis = ? WHERE id = ?",
+                    (blob, document_id),
+                )
+
+    def set_document_type(self, document_id: str, doc_type: str) -> None:
+        """Update the doc_type label for a document."""
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE documents SET doc_type = ? WHERE id = ?",
+                (doc_type, document_id),
+            )
+
+    def get_document(self, document_id: str, user_id: str) -> dict | None:
+        """
+        Return document metadata for the given document_id, or None if it
+        doesn't exist or belongs to a different user.
+        """
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, user_id, filename, doc_type, analysis FROM documents "
+                "WHERE id = ? AND user_id = ?",
+                (document_id, user_id),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        analysis = row["analysis"]
+        if isinstance(analysis, str):
+            try:
+                analysis = json.loads(analysis)
+            except Exception:
+                analysis = None
+
+        return {
+            "document_id": row["id"],
+            "user_id": row["user_id"],
+            "filename": row["filename"],
+            "doc_type": row["doc_type"],
+            "analysis": analysis,
+        }
+
+    def get_document_by_filename(self, user_id: str, filename: str) -> dict | None:
+        """
+        Return document metadata for the given user_id and filename, or None if not found.
+        """
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id, user_id, filename, doc_type, analysis FROM documents "
+                "WHERE user_id = ? AND filename = ?",
+                (user_id, filename),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        analysis = row["analysis"]
+        if isinstance(analysis, str):
+            try:
+                analysis = json.loads(analysis)
+            except Exception:
+                analysis = None
+
+        return {
+            "document_id": row["id"],
+            "user_id": row["user_id"],
+            "filename": row["filename"],
+            "doc_type": row["doc_type"],
+            "analysis": analysis,
+        }
 
 
-def _save(data: dict):
-    """Persist sessions to disk atomically."""
-    tmp = _SESSIONS_FILE.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, _SESSIONS_FILE)
+    # ── Chat sessions ─────────────────────────────────────────────────────
 
-
-class _SessionStore:
-    """
-    Thread-safe-ish in-process store backed by a JSON file.
-    Provides dict-like access to session messages plus helper methods
-    for titles and document metadata.
-    """
-
-    def __init__(self):
-        self._data: dict = _load()
-
-    # ── Internal helpers ──────────────────────────────────────
-
-    def _get_session(self, session_id: str) -> dict:
-        return self._data.get(session_id, {})
-
-    # ── Session lifecycle ─────────────────────────────────────
-
-    def create_session(self, session_id: str, title: str = "New Chat", user_id: str | None = None) -> None:
-        if session_id not in self._data:
-            self._data[session_id] = {
-                "title": title,
-                "messages": [],
-                "doc_name": None,
-                "doc_type": None,
-                "user_id": user_id,
-            }
-            _save(self._data)
+    def create_session(
+        self,
+        session_id: str,
+        document_id: str,
+        user_id: str,
+        title: str = "New Chat",
+    ) -> None:
+        """Create a chat session linked to an existing document."""
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO chat_sessions (id, user_id, document_id, title) "
+                "VALUES (?, ?, ?, ?)",
+                (session_id, user_id, document_id, title),
+            )
 
     def delete_session(self, session_id: str) -> None:
-        if session_id in self._data:
-            del self._data[session_id]
-            _save(self._data)
+        """Delete a chat session (cascade deletes its messages)."""
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM chat_sessions WHERE id = ?", (session_id,)
+            )
 
-    def all_sessions(self, user_id: str | None = None) -> list[dict]:
-        items = self._data.items()
-        if user_id is not None:
-            items = [(sid, s) for sid, s in items if s.get("user_id") == user_id]
+    def all_sessions(self, user_id: str) -> list[dict]:
+        """
+        Return all chat sessions for a user, newest first, joined with the
+        document so callers get filename/doc_type without a second query.
+        """
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT cs.id         AS session_id,
+                       cs.title,
+                       cs.document_id,
+                       d.filename    AS doc_name,
+                       d.doc_type
+                FROM   chat_sessions cs
+                JOIN   documents d ON d.id = cs.document_id
+                WHERE  cs.user_id = ?
+                ORDER  BY cs.created_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+
         return [
             {
-                "session_id": sid,
-                "title": s.get("title", "Untitled Chat"),
-                "doc_name": s.get("doc_name"),
-                "doc_type": s.get("doc_type"),
+                "session_id": r["session_id"],
+                "title": r["title"],
+                "document_id": r["document_id"],
+                "doc_name": r["doc_name"],
+                "doc_type": r["doc_type"],
             }
-            for sid, s in items
+            for r in rows
         ]
 
     def get_owner(self, session_id: str) -> str | None:
-        """Return the user_id that owns this session, or None if the session
-        has no recorded owner (e.g. created before this field existed)."""
-        return self._data.get(session_id, {}).get("user_id")
+        """Return the user_id that owns this session, or None if not found."""
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT user_id FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return row["user_id"] if row else None
+
+    def get_document_id_for_session(self, session_id: str) -> str | None:
+        """Return the document_id linked to this session."""
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT document_id FROM chat_sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        return row["document_id"] if row else None
 
     def __contains__(self, session_id: str) -> bool:
-        return session_id in self._data
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return row is not None
 
-    # ── Messages ──────────────────────────────────────────────
-
-    def get_messages(self, session_id: str) -> list:
-        return self._data.get(session_id, {}).get("messages", [])
-
-    def append_message(self, session_id: str, role: str, content: str) -> None:
-        if session_id not in self._data:
-            self.create_session(session_id)
-        self._data[session_id]["messages"].append(
-            {"role": role, "content": content}
-        )
-        _save(self._data)
-
-    # ── Titles ────────────────────────────────────────────────
+    # ── Session metadata ──────────────────────────────────────────────────
 
     def get_title(self, session_id: str) -> str:
-        return self._data.get(session_id, {}).get("title", "Untitled Chat")
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT title FROM chat_sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return row["title"] if row else "Untitled Chat"
 
     def set_title(self, session_id: str, title: str) -> None:
-        if session_id in self._data:
-            self._data[session_id]["title"] = title
-            _save(self._data)
-
-    # ── Document metadata ─────────────────────────────────────
-
-    def set_doc_info(self, session_id: str, doc_name: str, doc_type: str) -> None:
-        if session_id in self._data:
-            self._data[session_id]["doc_name"] = doc_name
-            self._data[session_id]["doc_type"] = doc_type
-            _save(self._data)
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE chat_sessions SET title = ? WHERE id = ?",
+                (title, session_id),
+            )
 
     def get_doc_name(self, session_id: str) -> str | None:
-        return self._data.get(session_id, {}).get("doc_name")
-
-    # ── Analysis results ──────────────────────────────────────
-
-    def set_analysis(self, session_id: str, analysis: dict) -> None:
-        """Persist the final_extracted_data for a session so it can be
-        restored when the user reopens the session later."""
-        if session_id not in self._data:
-            self.create_session(session_id)
-        self._data[session_id]["analysis"] = analysis
-        _save(self._data)
+        """Return the filename of the document linked to this session."""
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT d.filename
+                FROM   chat_sessions cs
+                JOIN   documents d ON d.id = cs.document_id
+                WHERE  cs.id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+        return row["filename"] if row else None
 
     def get_analysis(self, session_id: str) -> dict | None:
-        return self._data.get(session_id, {}).get("analysis")
+        """
+        Return the extracted analysis JSON for the document linked to this
+        session (analysis lives on the document, not the session).
+        """
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT d.analysis
+                FROM   chat_sessions cs
+                JOIN   documents d ON d.id = cs.document_id
+                WHERE  cs.id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+
+        if row is None or row["analysis"] is None:
+            return None
+
+        analysis = row["analysis"]
+        if isinstance(analysis, str):
+            try:
+                return json.loads(analysis)
+            except Exception:
+                return None
+        return analysis  # already a dict when psycopg2 deserialises JSONB
+
+    # ── Messages ──────────────────────────────────────────────────────────
+
+    def get_messages(self, session_id: str) -> list[dict]:
+        """Return all messages for a session, ordered by insertion."""
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT role, content FROM messages "
+                "WHERE session_id = ? ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
+        return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+    def append_message(self, session_id: str, role: str, content: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, role, content),
+            )
 
 
 # Singleton — imported everywhere
-session_store = _SessionStore()
-
-# ── Backward-compat shims (used by chat.py) ──────────────────
-# These proxy dicts map to the underlying SessionStore so existing
-# code that reads chat_sessions[sid] or chat_titles[sid] still works.
-
-class _MessagesProxy:
-    def __getitem__(self, sid):
-        return session_store.get_messages(sid)
-
-    def __setitem__(self, sid, val):
-        # Used when code does: chat_sessions[sid] = []
-        session_store.create_session(sid)
-
-    def get(self, sid, default=None):
-        if sid in session_store:
-            return session_store.get_messages(sid)
-        return default
-
-    def __contains__(self, sid):
-        return sid in session_store
-
-    def __iter__(self):
-        return iter(s["session_id"] for s in session_store.all_sessions())
-
-
-class _TitlesProxy:
-    def __getitem__(self, sid):
-        return session_store.get_title(sid)
-
-    def __setitem__(self, sid, val):
-        session_store.set_title(sid, val)
-
-    def get(self, sid, default=None):
-        if sid in session_store:
-            return session_store.get_title(sid)
-        return default
-
-
-# These names are imported by chat.py for backward compat
-chat_sessions = _MessagesProxy()
-chat_titles = _TitlesProxy()
+session_store = PGSessionStore()

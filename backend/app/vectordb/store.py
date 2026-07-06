@@ -4,32 +4,41 @@ from app.vectordb.embedder import embed_texts
 from app.vectordb.chroma_client import get_collection
 
 
-def store_chunks(chunks, session_id: str):
+def store_chunks(
+    chunks: list[str],
+    document_id: str,
+    user_id: str,
+    filename: str,
+) -> None:
     """
-    Store document chunks in the vector store, scoped to a session.
+    Store document chunks in ChromaDB, scoped to a document (not a session).
 
-    Each chunk gets a globally-unique ID (session_id + random suffix + index)
-    so re-uploading a document, or uploading multiple documents across
-    different sessions, never collides with or overwrites existing chunks.
-    The session_id is also stored as metadata so retrieval can be filtered
-    to only the chunks belonging to a given session/document.
+    Metadata stored per chunk:
+      - document_id  — the primary filter for retrieval
+      - user_id      — second-factor isolation so a user cannot retrieve
+                       another user's chunks even if they know the document_id
+      - filename     — human-readable label, useful for debugging
+
+    Chunk IDs include a random tag so the same document can be re-uploaded
+    (with a new document_id) without colliding with previous chunks.
     """
-    if not session_id:
-        raise ValueError("store_chunks requires a session_id to scope chunks")
-
+    if not document_id:
+        raise ValueError("store_chunks requires a document_id")
+    if not user_id:
+        raise ValueError("store_chunks requires a user_id")
     if not chunks:
         return
 
     upload_tag = uuid.uuid4().hex[:8]
 
-    # Batch-embed all chunks in a single hosted API call — much faster than
-    # one-by-one, and avoids loading any model locally.
     embeddings = embed_texts(chunks)
 
-    ids = [f"{session_id}_{upload_tag}_{i}" for i in range(len(chunks))]
-    metadatas = [{"session_id": session_id} for _ in chunks]
+    ids = [f"{document_id}_{upload_tag}_{i}" for i in range(len(chunks))]
+    metadatas = [
+        {"document_id": document_id, "user_id": user_id, "filename": filename}
+        for _ in chunks
+    ]
 
-    # Single bulk insert instead of N individual adds
     get_collection().add(
         ids=ids,
         documents=chunks,

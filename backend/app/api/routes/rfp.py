@@ -57,40 +57,31 @@ def _build_final_response(workflow_result: dict) -> dict:
     }
 
 
-def _ensure_session(session_id: Optional[str], user_id: str) -> str:
+def process_and_store_document(
+    text: str,
+    document_id: str,
+    user_id: str,
+    filename: str,
+) -> tuple[dict, dict]:
     """
-    Guarantee we always have a session_id to scope vector store chunks to.
-    If the caller didn't provide one, create a fresh chat session and use
-    that ID so chunks and future chat retrieval line up automatically.
-    Raises 403 if the caller tries to upload into a session owned by
-    a different user.
+    Embed document chunks and run the extraction workflow.
+
+    Steps:
+      1. Chunk the text into small pieces for RAG retrieval.
+      2. Embed and store those chunks in ChromaDB, keyed to document_id + user_id.
+      3. Run the LangGraph workflow to extract structured fields.
+      4. Persist the extraction result on the document row.
+
+    Returns (meta_dict, workflow_result).
     """
-    if session_id and session_id in session_store:
-        owner = session_store.get_owner(session_id)
-        if owner is not None and owner != user_id:
-            raise HTTPException(status_code=403, detail="This session belongs to another user.")
-        return session_id
-
-    new_session_id = session_id or str(uuid4())
-    session_store.create_session(new_session_id, user_id=user_id)
-    return new_session_id
-
-
-def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
-    """
-    Process raw document text through the agent workflow.
-    Returns (final_extracted_data, workflow_result).
-
-    NOTE: the full document text is handed to the workflow, not a
-    truncated slice of it. The workflow (app/graph/workflow.py) batches
-    the full text and extracts from every batch, so long documents are
-    fully covered, not just their first ~2 pages.
-    """
-    # Small, fine-grained chunks used ONLY for the chat/RAG feature —
-    # separate from the larger batches the extraction workflow builds
-    # internally.
+    # Fine-grained chunks for chat/RAG (separate from the larger workflow batches)
     chunks = chunk_document(text)
-    store_chunks(chunks, session_id=session_id)
+    store_chunks(
+        chunks,
+        document_id=document_id,
+        user_id=user_id,
+        filename=filename,
+    )
 
     initial_state = {
         "text": text,
@@ -109,14 +100,14 @@ def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
     workflow_result = app_graph.invoke(initial_state)
     final_response = _build_final_response(workflow_result)
 
-    # Persist so the analysis is restored when the user reopens this session
-    session_store.set_analysis(session_id, final_response)
+    # Persist analysis on the document record (not the session)
+    session_store.set_document_analysis(document_id, final_response)
 
     meta = {
         "total_characters": len(text),
         "total_chunks": len(chunks),
         "message": "Document processed successfully",
-        "session_id": session_id,
+        "document_id": document_id,
         "final_extracted_data": final_response,
     }
 
@@ -126,46 +117,137 @@ def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
 @router.post("/upload")
 async def upload_rfp(
     file: UploadFile = File(...),
-    session_id: Optional[str] = None,
     user_id: str = Depends(get_current_user),
 ):
-    session_id = _ensure_session(session_id, user_id)
+    """
+    Upload and analyze a PDF or DOCX document.
 
+    If a document with the same filename has already been uploaded by this user,
+    we reuse its document_id and analysis, avoiding re-embedding and re-extracting,
+    and simply start a new chat session for it.
+    """
+    # Check for existing document by this user with the same filename
+    existing_doc = session_store.get_document_by_filename(user_id=user_id, filename=file.filename)
+
+    if existing_doc is not None:
+        # Re-use existing document and start a new chat session
+        document_id = existing_doc["document_id"]
+        doc_type_label = existing_doc["doc_type"] or "Document"
+        session_id = str(uuid4())
+        title = f"{doc_type_label}: {file.filename}"
+        session_store.create_session(
+            session_id=session_id,
+            document_id=document_id,
+            user_id=user_id,
+            title=title,
+        )
+        return {
+            "filename": file.filename,
+            "document_id": document_id,
+            "session_id": session_id,
+            "total_characters": 0,
+            "total_chunks": 0,
+            "message": "Reused existing document embeddings and analysis",
+            "final_extracted_data": existing_doc["analysis"],
+        }
+
+    # 1. Save file to disk
     file_path = UPLOAD_DIR / file.filename
-
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    # 2. Extract text
     text = extract_text_from_pdf(str(file_path))
 
-    meta, workflow_result = process_rfp_text(text, session_id=session_id)
+    # 3. Create the document record first (so we have a document_id)
+    document_id = session_store.create_document(
+        user_id=user_id,
+        filename=file.filename,
+    )
 
+    # 4. Embed + run workflow
+    meta, workflow_result = process_and_store_document(
+        text=text,
+        document_id=document_id,
+        user_id=user_id,
+        filename=file.filename,
+    )
+
+    # 5. Update doc_type now that we know it
     doc_type_label = meta["final_extracted_data"].get("document_type_label", "Document")
-    title = f"{doc_type_label}: {file.filename}"
-    session_store.set_title(session_id, title)
-    session_store.set_doc_info(session_id, file.filename, doc_type_label)
+    session_store.set_document_type(document_id, doc_type_label)
 
-    return {"filename": file.filename, **meta}
+    # 6. Create the initial chat session for this document
+    session_id = str(uuid4())
+    title = f"{doc_type_label}: {file.filename}"
+    session_store.create_session(
+        session_id=session_id,
+        document_id=document_id,
+        user_id=user_id,
+        title=title,
+    )
+
+    return {
+        "filename": file.filename,
+        "document_id": document_id,
+        "session_id": session_id,
+        **meta,
+    }
 
 
 @router.post("/analyze-text")
-async def process_text_rfp(request: TextRFPRequest, user_id: str = Depends(get_current_user)):
-    session_id = _ensure_session(request.session_id, user_id)
+async def process_text_rfp(
+    request: TextRFPRequest,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Analyze pasted/manually entered text.
 
-    meta, workflow_result = process_rfp_text(request.text, session_id=session_id)
+    Same flow as /upload but without a physical file.  A document record is
+    created with filename="Pasted Text" so the document management model
+    works identically.
+    """
+    filename = "Pasted Text"
 
+    # 1. Create the document record
+    document_id = session_store.create_document(
+        user_id=user_id,
+        filename=filename,
+    )
+
+    # 2. Embed + run workflow
+    meta, workflow_result = process_and_store_document(
+        text=request.text,
+        document_id=document_id,
+        user_id=user_id,
+        filename=filename,
+    )
+
+    # 3. Update doc_type
     doc_type_label = meta["final_extracted_data"].get("document_type_label", "Document")
-    title = f"{doc_type_label}: Pasted Text"
-    session_store.set_title(session_id, title)
-    session_store.set_doc_info(session_id, "Pasted Text", doc_type_label)
+    session_store.set_document_type(document_id, doc_type_label)
 
-    return {"source": "manual_text", **meta}
+    # 4. Create the initial chat session
+    session_id = str(uuid4())
+    title = f"{doc_type_label}: Pasted Text"
+    session_store.create_session(
+        session_id=session_id,
+        document_id=document_id,
+        user_id=user_id,
+        title=title,
+    )
+
+    return {
+        "source": "manual_text",
+        "document_id": document_id,
+        "session_id": session_id,
+        **meta,
+    }
 
 
 @router.get("/download/{filename}")
 async def download_file(filename: str, user_id: str = Depends(get_current_user)):
-    """Serve the originally uploaded file as a download attachment.
-    Requires login (previously unauthenticated)."""
+    """Serve the originally uploaded file as a download attachment."""
     file_path = UPLOAD_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"File '{filename}' not found.")

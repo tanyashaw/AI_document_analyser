@@ -1,22 +1,15 @@
 """
-Persistence for user accounts — Postgres if DATABASE_URL is set, otherwise a
+Persistence layer — Postgres (Supabase) when DATABASE_URL is set, otherwise a
 local SQLite file for zero-setup local development.
 
-Why this exists: with SQLite alone, "the database" is just a file sitting
-next to the code. Whichever machine runs the app owns that file, so an
-account created on one machine simply doesn't exist on another machine's
-copy of the repo (this is exactly what caused "my login works on my
-personal machine but not my work machine"). Pointing DATABASE_URL at a
-real hosted Postgres instance (Supabase, Neon, and Render all have usable
-free tiers) fixes that at the root: every machine talks to the same
-database over the network, so accounts — and anything else you store here
-later — are shared instead of living on one laptop's disk.
+Tables managed here:
+  users          — authentication (was here before)
+  documents      — one row per uploaded / pasted document (NEW)
+  chat_sessions  — one row per conversation thread (NEW)
+  messages       — ordered turn-by-turn conversation history (NEW)
 
-Both backends expose the SAME interface to the rest of the app:
-get_db(), conn.execute(sql, params).fetchone()/.fetchall(), row["column"]
-access, and an IntegrityError you can catch on duplicate inserts — so
-nothing in auth.py (or any future caller) needs backend-specific code.
-Just set DATABASE_URL and nothing else has to change.
+All four backends (Postgres or SQLite) expose the SAME interface:
+  get_db(), conn.execute(sql, params), row["column"], IntegrityError.
 """
 
 import os
@@ -34,12 +27,9 @@ if USING_POSTGRES:
 
     class _PGConnWrapper:
         """
-        Makes a psycopg2 connection support conn.execute(sql, params) the
-        same way sqlite3.Connection does (sqlite3 lets you call .execute()
-        directly on the connection; psycopg2 requires a cursor). Also
-        translates '?' placeholders — used everywhere else in this
-        codebase, sqlite-style — into psycopg2's '%s' style, so callers
-        don't need to know which database they're talking to.
+        Makes a psycopg2 connection support conn.execute(sql, params) the same
+        way sqlite3.Connection does. Also translates '?' placeholders (used
+        everywhere else in this codebase) into psycopg2's '%s' style.
         """
 
         def __init__(self, conn):
@@ -84,33 +74,108 @@ def get_db():
         conn.close()
 
 
+# ── Table definitions ──────────────────────────────────────────────────────
+
+_PG_USERS = """
+    CREATE TABLE IF NOT EXISTS users (
+        id           TEXT PRIMARY KEY,
+        email        TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+
+_SQLITE_USERS = """
+    CREATE TABLE IF NOT EXISTS users (
+        id           TEXT PRIMARY KEY,
+        email        TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        password_hash TEXT NOT NULL,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+"""
+
+# documents — one row per uploaded/pasted document, independent of sessions
+_PG_DOCUMENTS = """
+    CREATE TABLE IF NOT EXISTS documents (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        filename    TEXT NOT NULL,
+        doc_type    TEXT,
+        analysis    JSONB,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+
+_SQLITE_DOCUMENTS = """
+    CREATE TABLE IF NOT EXISTS documents (
+        id         TEXT PRIMARY KEY,
+        user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        filename   TEXT NOT NULL,
+        doc_type   TEXT,
+        analysis   TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+"""
+
+# chat_sessions — many sessions can reference the same document
+_PG_SESSIONS = """
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        title       TEXT NOT NULL DEFAULT 'New Chat',
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+
+_SQLITE_SESSIONS = """
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        title       TEXT NOT NULL DEFAULT 'New Chat',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+"""
+
+# messages — ordered conversation turns, foreign-keyed to a session
+_PG_MESSAGES = """
+    CREATE TABLE IF NOT EXISTS messages (
+        id         BIGSERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content    TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+"""
+
+_SQLITE_MESSAGES = """
+    CREATE TABLE IF NOT EXISTS messages (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        role       TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+        content    TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+"""
+
+
 def init_db() -> None:
+    """Create all tables idempotently. Safe to call multiple times."""
     if USING_POSTGRES:
-        create_sql = """
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """
-        # Postgres UNIQUE is case-sensitive by default (no COLLATE NOCASE
-        # equivalent needed here) — not a problem in practice because
-        # every caller already lowercases the email before insert/lookup
-        # (see auth.py), so case-insensitivity is enforced at the
-        # application layer either way.
+        statements = [_PG_USERS, _PG_DOCUMENTS, _PG_SESSIONS, _PG_MESSAGES]
     else:
-        create_sql = """
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-        """
+        statements = [
+            _SQLITE_USERS,
+            _SQLITE_DOCUMENTS,
+            _SQLITE_SESSIONS,
+            _SQLITE_MESSAGES,
+        ]
+
     with get_db() as conn:
-        conn.execute(create_sql)
+        for sql in statements:
+            conn.execute(sql)
 
 
-# Run once at import time so the table exists before the first request.
+# Run once at import time so all tables exist before the first request.
 init_db()

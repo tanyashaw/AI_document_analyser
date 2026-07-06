@@ -1,5 +1,5 @@
-from uuid import uuid4
 import json
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -15,68 +15,117 @@ router = APIRouter(
 
 
 def _check_owner(session_id: str, user_id: str) -> None:
-    """Raise 403 if this session belongs to a different user.
-    Sessions with no recorded owner (created before this check existed)
-    are left accessible rather than locked out."""
+    """Raise 403 if this session belongs to a different user."""
     owner = session_store.get_owner(session_id)
     if owner is not None and owner != user_id:
-        raise HTTPException(status_code=403, detail="This session belongs to another user.")
+        raise HTTPException(
+            status_code=403,
+            detail="This session belongs to another user.",
+        )
 
 
 @router.get("/sessions")
 async def get_sessions(user_id: str = Depends(get_current_user)):
+    """
+    Return all chat sessions for the authenticated user.
+
+    Each item includes document_id, doc_name, and doc_type so the frontend
+    can group sessions by document or display document metadata alongside
+    each session title.
+    """
     return {"sessions": session_store.all_sessions(user_id=user_id)}
 
 
-@router.post("/new-session")
-async def create_new_session(user_id: str = Depends(get_current_user)):
-    session_id = str(uuid4())
-    session_store.create_session(session_id, title="New Chat", user_id=user_id)
-    return {"session_id": session_id}
-
 
 @router.delete("/session/{session_id}")
-async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
+async def delete_session(
+    session_id: str,
+    user_id: str = Depends(get_current_user),
+):
     _check_owner(session_id, user_id)
     session_store.delete_session(session_id)
     return {"deleted": session_id}
 
 
 @router.patch("/session/{session_id}/rename")
-async def rename_session(session_id: str, title: str, user_id: str = Depends(get_current_user)):
+async def rename_session(
+    session_id: str,
+    title: str,
+    user_id: str = Depends(get_current_user),
+):
     _check_owner(session_id, user_id)
     session_store.set_title(session_id, title)
     return {"session_id": session_id, "title": title}
 
 
 @router.get("/history/{session_id}")
-async def get_chat_history(session_id: str, user_id: str = Depends(get_current_user)):
+async def get_chat_history(
+    session_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Return the full history for a session including messages, title, and the
+    document metadata (document_id, filename, analysis).
+
+    The frontend uses this when restoring a session from the sidebar so it
+    can render both the analysis report and the chat thread.
+    """
     _check_owner(session_id, user_id)
+
+    messages = session_store.get_messages(session_id)
+    title = session_store.get_title(session_id)
+    doc_name = session_store.get_doc_name(session_id)
+    analysis = session_store.get_analysis(session_id)
+    document_id = session_store.get_document_id_for_session(session_id)
+
     return {
         "session_id": session_id,
-        "messages": session_store.get_messages(session_id),
-        "title": session_store.get_title(session_id),
-        "doc_name": session_store.get_doc_name(session_id),
-        "analysis": session_store.get_analysis(session_id),
+        "document_id": document_id,
+        "messages": messages,
+        "title": title,
+        "doc_name": doc_name,
+        "analysis": analysis,
     }
 
 
 @router.post("/ask")
-async def ask_question(question: str, session_id: str, user_id: str = Depends(get_current_user)):
+async def ask_question(
+    question: str,
+    session_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Ask a question about the document associated with this session.
 
+    Retrieval is filtered by document_id + user_id so embeddings from other
+    documents or other users are never returned.
+    """
     if session_id not in session_store:
-        session_store.create_session(session_id, user_id=user_id)
-    else:
-        _check_owner(session_id, user_id)
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found. Upload a document to start a new session.",
+        )
 
-    # ── Document identity ──────────────────────────────────────────────────
+    _check_owner(session_id, user_id)
+
+    # ── Resolve document identity ──────────────────────────────────────────
+    document_id = session_store.get_document_id_for_session(session_id)
+    if not document_id:
+        raise HTTPException(
+            status_code=404,
+            detail="No document associated with this session.",
+        )
+
     doc_name = session_store.get_doc_name(session_id) or "the uploaded document"
-    doc_type = session_store.get_doc_name(session_id)  # may be None
     stored_analysis = session_store.get_analysis(session_id)
 
-    # ── Retrieve relevant chunks scoped to this session ────────────────────
-    # top_k=6 gives broader coverage than 3 for detailed questions
-    relevant_chunks = retrieve_relevant_chunks(question, session_id=session_id, top_k=6)
+    # ── Retrieve relevant chunks scoped to this document ───────────────────
+    relevant_chunks = retrieve_relevant_chunks(
+        question,
+        document_id=document_id,
+        user_id=user_id,
+        top_k=6,
+    )
 
     if not relevant_chunks:
         no_doc_answer = (
@@ -93,13 +142,12 @@ async def ask_question(question: str, session_id: str, user_id: str = Depends(ge
     previous_messages = session_store.get_messages(session_id)
     previous_conversation = "\n".join(
         f"{msg['role'].upper()}: {msg['content']}"
-        for msg in previous_messages[-6:]  # last 3 turns only to save tokens
+        for msg in previous_messages[-6:]  # last 3 turns to save tokens
     )
 
-    # ── Structured analysis summary (already extracted) ───────────────────
+    # ── Structured analysis summary ────────────────────────────────────────
     analysis_summary = ""
     if stored_analysis:
-        # Provide a compact version of the structured analysis for the LLM
         analysis_summary = f"""
 STRUCTURED ANALYSIS ALREADY EXTRACTED FROM THIS DOCUMENT:
 - Executive Summary: {stored_analysis.get('executive_summary', 'N/A')[:600]}
