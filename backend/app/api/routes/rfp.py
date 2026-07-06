@@ -31,9 +31,6 @@ class TextRFPRequest(BaseModel):
     session_id: Optional[str] = None
 
 
-MAX_ANALYSIS_CHARS = 8000  # keep agent prompts within a safe context budget (this text is re-sent to ~10 separate LLM calls, so keeping it small matters a lot for token budget)
-
-
 def _build_final_response(workflow_result: dict) -> dict:
     """Build the final_extracted_data dict from workflow results."""
     doc_type = workflow_result.get("document_type", {})
@@ -83,21 +80,20 @@ def process_rfp_text(text: str, session_id: str) -> tuple[dict, dict]:
     """
     Process raw document text through the agent workflow.
     Returns (final_extracted_data, workflow_result).
+
+    NOTE: the full document text is handed to the workflow, not a
+    truncated slice of it. The workflow (app/graph/workflow.py) batches
+    the full text and extracts from every batch, so long documents are
+    fully covered, not just their first ~2 pages.
     """
+    # Small, fine-grained chunks used ONLY for the chat/RAG feature —
+    # separate from the larger batches the extraction workflow builds
+    # internally.
     chunks = chunk_document(text)
     store_chunks(chunks, session_id=session_id)
 
-    combined_text = ""
-    for chunk in chunks:
-        if len(combined_text) + len(chunk) > MAX_ANALYSIS_CHARS:
-            break
-        combined_text += ("\n" if combined_text else "") + chunk
-
-    if not combined_text:
-        combined_text = text[:MAX_ANALYSIS_CHARS]
-
     initial_state = {
-        "text": combined_text,
+        "text": text,
         "document_type": {},
         "scope": {},
         "deadlines": {},

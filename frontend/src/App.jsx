@@ -39,6 +39,41 @@ async function apiFetch(url, options = {}) {
   return res;
 }
 
+// ── Analysis report helpers ────────────────────────────────
+// Icon + accent color per category, reused for both the stat-card
+// overview strip and each section's heading — this is what gives the
+// results view a consistent, color-coded visual language instead of
+// one long undifferentiated list.
+const SECTION_META = {
+  summary: { icon: () => <I.File />, color: "#A78BFA", label: "Summary" },
+  objectives: { icon: () => <I.Target />, color: "#4ECDC4", label: "Objectives" },
+  highlights: { icon: () => <I.Star />, color: "#FF6B35", label: "Key Highlights" },
+  scope: { icon: () => <I.Layers />, color: "#FF6B35", label: "Scope of Work" },
+  deliverables: { icon: () => <I.Package />, color: "#FF9F5A", label: "Deliverables" },
+  technical: { icon: () => <I.Code />, color: "#3b82f6", label: "Technical Requirements" },
+  commercial: { icon: () => <I.DollarSign />, color: "#f43f5e", label: "Commercial Requirements" },
+  deadlines: { icon: () => <I.Clock />, color: "#4ECDC4", label: "Key Deadlines & Milestones" },
+  staffing: { icon: () => <I.Users />, color: "#60A5FA", label: "Staffing Requirements" },
+  risks: { icon: () => <I.Alert />, color: "#ef4444", label: "Risks" },
+  compliance: { icon: () => <I.Shield />, color: "#A78BFA", label: "Compliance Requirements" },
+};
+
+// A single section's heading: icon chip + title + how many items were
+// found. Every section uses this instead of a bare <h2>, so scanning the
+// report tells you at a glance which sections actually have content.
+function SectionHeading({ id, count }) {
+  const meta = SECTION_META[id];
+  return (
+    <h2 className="doc-section-heading" style={{ "--sec-color": meta.color }}>
+      <span className="sec-icon-chip"><meta.icon /></span>
+      <span className="sec-title">{meta.label}</span>
+      {typeof count === "number" && (
+        <span className="sec-count-badge">{count}</span>
+      )}
+    </h2>
+  );
+}
+
 // ── Icons ──────────────────────────────────────────────────
 const I = {
   Menu: () => <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M4 6h16M4 12h16M4 18h16" /></svg>,
@@ -72,9 +107,35 @@ const I = {
   Chat: () => <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>,
   ChevDown: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>,
   ChevUp: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 15l7-7 7 7" /></svg>,
+  LogOut: () => <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M17 16l4-4m0 0l-4-4m4 4H7m6 5v1a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h5a2 2 0 012 2v1" /></svg>,
+  Package: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 2L2 7l10 5 10-5-10-5zM2 7v10l10 5V12M22 7v10l-10 5V12" /></svg>,
+  Code: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M16 18l6-6-6-6M8 6l-6 6 6 6" /></svg>,
+  DollarSign: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" /></svg>,
+  Star: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z" /></svg>,
+  Layers: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
+  Users: () => <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>,
 };
 
 const cx = (...a) => a.filter(Boolean).join(" ");
+
+// Same icon paths as the "I" set above, as raw SVG strings — used in the
+// print/PDF report, which is plain HTML markup rather than JSX.
+const PRINT_ICON_PATHS = {
+  file: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+  target: "M13 10V3L4 14h7v7l9-11h-7z",
+  star: "M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01L12 2z",
+  layers: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+  package: "M12 2L2 7l10 5 10-5-10-5zM2 7v10l10 5V12M22 7v10l-10 5V12",
+  code: "M16 18l6-6-6-6M8 6l-6 6 6 6",
+  dollar: "M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6",
+  clock: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z",
+  users: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75",
+  alert: "M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z",
+  shield: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+};
+function printIcon(name, color) {
+  return `<svg width="14" height="14" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="${PRINT_ICON_PATHS[name]}" /></svg>`;
+}
 
 // ── PDF Report generator ────────────────────────────────────
 function generatePDFReport(data, sessionTitle) {
@@ -93,18 +154,19 @@ function generatePDFReport(data, sessionTitle) {
     if (!arr?.length) return "<p style='color:#999;font-size:12px;'>None detected</p>";
     const rows = arr.map(c => {
       if (typeof c === "string") return `<tr><td>${c}</td><td>—</td><td>—</td><td>—</td></tr>`;
-      return `<tr><td>${c.requirement || ""}</td><td>${c.category || ""}</td><td>${c.page_ref || "N/A"}</td><td>${c.mandatory === true ? "✅ Yes" : c.mandatory === false ? "No" : "—"}</td></tr>`;
+      return `<tr><td>${c.requirement || ""}</td><td>${c.category || ""}</td><td>${c.page_ref || "N/A"}</td><td>${c.mandatory === true ? "<span style='color:#16a34a;font-weight:700;'>Yes</span>" : c.mandatory === false ? "No" : "—"}</td></tr>`;
     }).join("");
     return `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;"><thead><tr style="background:#f5f0ff;"><th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Requirement</th><th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Category</th><th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Page</th><th style="padding:6px 10px;text-align:left;border:1px solid #ddd;">Mandatory</th></tr></thead><tbody>${rows}</tbody></table>`;
   };
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Document Analyser Report</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AI Document Intelligence Report</title>
   <style>
     body{font-family:'Segoe UI',sans-serif;max-width:780px;margin:0 auto;padding:40px;color:#1a1512;}
     h1{font-size:28px;font-weight:800;color:#FF6B35;margin-bottom:4px;}
     .sub{color:#888;font-size:13px;margin-bottom:32px;}
     .section{margin-bottom:28px;page-break-inside:avoid;}
     .section-header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:10px;margin-bottom:12px;}
+    .section-header span{display:inline-flex;align-items:center;}
     .scope .section-header, .deliverables .section-header{background:rgba(255,107,53,0.1);}
     .deadline .section-header{background:rgba(78,205,196,0.1);}
     .staffing .section-header{background:rgba(96,165,250,0.1);}
@@ -130,26 +192,26 @@ function generatePDFReport(data, sessionTitle) {
     .footer{margin-top:40px;padding-top:16px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center;}
     @media print{body{padding:20px;}}
   </style></head><body>
-  <h1>📋 AI Document Analyser Report</h1>
+  <h1>AI Document Intelligence Report</h1>
   <div class="sub">Session: ${sessionTitle || "Analysis"} &nbsp;·&nbsp; Generated: ${new Date().toLocaleString()}</div>
   ${data.document_type_label ? `<div class="doctype">${data.document_type_label}</div>` : ""}
   ${data.executive_summary ? `<div class="exec-summary">${data.executive_summary}</div>` : ""}
-  <div class="section objectives"><div class="section-header"><span>🎯</span><h2>Objectives</h2></div><ul>${items(data.objectives)}</ul></div>
-  <div class="section scope"><div class="section-header"><span>📐</span><h2>Scope of Work</h2></div><ul>${items(data.project_scope)}</ul></div>
-  <div class="section deliverables"><div class="section-header"><span>📦</span><h2>Deliverables</h2></div><ul>${items(data.deliverables)}</ul></div>
-  <div class="section technical"><div class="section-header"><span>💻</span><h2>Technical Requirements</h2></div><ul>${items(data.technical_requirements)}</ul></div>
-  <div class="section commercial"><div class="section-header"><span>💰</span><h2>Commercial Requirements</h2></div><ul>${items(data.commercial_requirements)}</ul></div>
-  <div class="section deadline"><div class="section-header"><span>⏰</span><h2>Key Deadlines</h2></div><ul>${items(data.deadlines)}</ul></div>
-  <div class="section staffing"><div class="section-header"><span>👥</span><h2>Staffing Requirements</h2></div><ul>${items(data.staffing_requirements)}</ul></div>
-  <div class="section risks"><div class="section-header"><span>⚠️</span><h2>Risks</h2></div><ul>${data.risks?.length ? data.risks.map((r, i) => {
+  <div class="section objectives"><div class="section-header"><span>${printIcon("target", "#22c55e")}</span><h2>Objectives</h2></div><ul>${items(data.objectives)}</ul></div>
+  <div class="section scope"><div class="section-header"><span>${printIcon("layers", "#FF6B35")}</span><h2>Scope of Work</h2></div><ul>${items(data.project_scope)}</ul></div>
+  <div class="section deliverables"><div class="section-header"><span>${printIcon("package", "#FF6B35")}</span><h2>Deliverables</h2></div><ul>${items(data.deliverables)}</ul></div>
+  <div class="section technical"><div class="section-header"><span>${printIcon("code", "#3b82f6")}</span><h2>Technical Requirements</h2></div><ul>${items(data.technical_requirements)}</ul></div>
+  <div class="section commercial"><div class="section-header"><span>${printIcon("dollar", "#f43f5e")}</span><h2>Commercial Requirements</h2></div><ul>${items(data.commercial_requirements)}</ul></div>
+  <div class="section deadline"><div class="section-header"><span>${printIcon("clock", "#4ECDC4")}</span><h2>Key Deadlines</h2></div><ul>${items(data.deadlines)}</ul></div>
+  <div class="section staffing"><div class="section-header"><span>${printIcon("users", "#60A5FA")}</span><h2>Staffing Requirements</h2></div><ul>${items(data.staffing_requirements)}</ul></div>
+  <div class="section risks"><div class="section-header"><span>${printIcon("alert", "#ef4444")}</span><h2>Risks</h2></div><ul>${data.risks?.length ? data.risks.map((r, i) => {
     if (typeof r === "string") return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r}</li>`;
     const sevClass = r.severity ? `risk-sev risk-sev-${r.severity.toLowerCase()}` : "";
     return `<li style="margin:4px 0;font-size:12px;">${i + 1}. ${r.risk || r.item || ""} ${r.severity ? `<span class="${sevClass}">${r.severity}</span>` : ""} ${r.type ? `[${r.type}]` : ""} ${r.page_ref && r.page_ref !== "N/A" ? `<em>(${r.page_ref})</em>` : ""}</li>`;
   }).join("") : "<li style='color:#999;font-size:12px;'>None detected</li>"
     }</ul></div>
-  <div class="section compliance"><div class="section-header"><span>🛡️</span><h2>Compliance Requirements</h2></div>${complianceTable(data.compliance_requirements)}</div>
-  <div class="section highlights"><div class="section-header"><span>💡</span><h2>Key Highlights</h2></div><ul>${items(data.key_highlights)}</ul></div>
-  <div class="footer">Generated by AI Document Analyser AI Workspace</div>
+  <div class="section compliance"><div class="section-header"><span>${printIcon("shield", "#A78BFA")}</span><h2>Compliance Requirements</h2></div>${complianceTable(data.compliance_requirements)}</div>
+  <div class="section highlights"><div class="section-header"><span>${printIcon("star", "#F59E0B")}</span><h2>Key Highlights</h2></div><ul>${items(data.key_highlights)}</ul></div>
+  <div class="footer">Generated by AI Document Intelligence AI Workspace</div>
   </body></html>`;
 
   const blob = new Blob([html], { type: "text/html" });
@@ -162,6 +224,11 @@ function generatePDFReport(data, sessionTitle) {
 function MainApp({ onLogout }) {
   // Upload state
   const [file, setFile] = useState(null);
+  // Name of the originally-analyzed document, kept separate from `file`
+  // (which only holds the in-memory File object from the upload widget).
+  // This survives page loads and reopening a session from the sidebar,
+  // so the "Download Original" link always has something to point to.
+  const [docFilename, setDocFilename] = useState(null);
   const [manualText, setManualText] = useState("");
   const [inputMode, setInputMode] = useState("file"); // "file" | "text"
   const [dragOver, setDragOver] = useState(false);
@@ -190,6 +257,7 @@ function MainApp({ onLogout }) {
   const [renaming, setRenaming] = useState(null);
   const [renameVal, setRenameVal] = useState("");
   const [confirmDel, setConfirmDel] = useState(null);
+  const [confirmLogout, setConfirmLogout] = useState(false);
 
   const msgEndRef = useRef(null);
   const renameRef = useRef(null);
@@ -233,6 +301,7 @@ function MainApp({ onLogout }) {
     setMessages([]);
     setResult(null);
     setFile(null);
+    setDocFilename(null);
     setManualText("");
     setChatOpen(false);
     setMobileOpen(false);
@@ -246,6 +315,15 @@ function MainApp({ onLogout }) {
       setActiveSession(sid);
       setMessages(d.messages || []);
       setResult(d.analysis ? { final_extracted_data: d.analysis } : null);
+      // The uploaded File object itself doesn't persist across reloads, but
+      // the filename does — pull it from whichever field the backend sends,
+      // falling back to the session title (which is usually the filename).
+      const session = sessions.find(s => s.session_id === sid);
+      setFile(null);
+      setDocFilename(
+        d.filename || d.file_name || d.original_filename || d.document_name ||
+        session?.filename || session?.file_name || session?.title || null
+      );
       setChatOpen(true);
       setMobileOpen(false);
     } catch { toast$("Failed to load history.", "error"); }
@@ -316,6 +394,7 @@ function MainApp({ onLogout }) {
       const newSid = data.session_id;
       setActiveSession(newSid);
       setResult(data);
+      setDocFilename(inputMode === "file" ? uploadFile.name : null);
       await loadSessions();
       toast$("Document analyzed successfully!", "success");
     } catch { toast$("Failed to analyze document.", "error"); }
@@ -335,7 +414,7 @@ function MainApp({ onLogout }) {
       const d = await r.json();
       setMessages(p => [...p, { role: "assistant", content: d.answer }]);
     } catch {
-      setMessages(p => [...p, { role: "assistant", content: "⚠️ Error communicating with server." }]);
+      setMessages(p => [...p, { role: "assistant", content: "Error communicating with server." }]);
     } finally { setChatLoading(false); }
   };
 
@@ -399,6 +478,37 @@ function MainApp({ onLogout }) {
         </div>
       )}
 
+      {/* Logout confirm modal */}
+      {confirmLogout && (
+        <div className="modal-bg" onClick={() => setConfirmLogout(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: "50%",
+                background: "var(--accent-l)",
+                color: "var(--accent)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 8
+              }}
+            >
+              <I.LogOut />
+            </div>
+            <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: 16, marginBottom: 6 }}>Log out?</div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>
+              You'll need to sign back in to access your sessions and analyses.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="btn-ghost" onClick={() => setConfirmLogout(false)}>Cancel</button>
+              <button className="btn-primary" onClick={onLogout}>Log out</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Context menu */}
       {ctxMenu && (
         <div className="ctx-menu" style={{ top: ctxMenu.y, left: ctxMenu.x }} onClick={e => e.stopPropagation()}>
@@ -425,7 +535,7 @@ function MainApp({ onLogout }) {
               <line x1="16" y1="17" x2="8" y2="17" />
             </svg>
           </div>
-          {sidebarOpen && <div><div className="sb-name">AI Document Analyser</div><div className="sb-sub">AI Workspace</div></div>}
+          {sidebarOpen && <div><div className="sb-name">AI Document Intelligence</div><div className="sb-sub">AI Workspace</div></div>}
         </div>
 
         <button className="sb-new" onClick={newAnalysis}>
@@ -483,7 +593,7 @@ function MainApp({ onLogout }) {
             <button className="mob-menu" onClick={() => setMobileOpen(true)}><I.Menu /></button>
             <div className="header-title">
               {activeSession
-                ? <><span style={{ color: "var(--text-secondary)" }}>AI Document Analyser</span>
+                ? <><span style={{ color: "var(--text-secondary)" }}>AI Document Intelligence</span>
                   <span style={{ color: "var(--border)", margin: "0 4px" }}><I.ChevR /></span>
                   <span>{activeTitle}</span></>
                 : <>
@@ -491,7 +601,7 @@ function MainApp({ onLogout }) {
                     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
                     <polyline points="14 2 14 8 20 8" />
                   </svg>
-                  AI Document Analyser
+                  AI Document Intelligence
                 </>
               }
             </div>
@@ -505,7 +615,11 @@ function MainApp({ onLogout }) {
             <button className="theme-btn" onClick={() => setTheme(isDark ? "light" : "dark")}>
               {isDark ? <I.Sun /> : <I.Moon />}
             </button>
-            <button className="theme-btn logout-btn" title="Log out" onClick={onLogout}>
+            <button
+              className="theme-btn logout-btn"
+              title="Log out"
+              onClick={() => setConfirmLogout(true)}
+            >
               Log out
             </button>
           </div>
@@ -521,7 +635,7 @@ function MainApp({ onLogout }) {
                 <div className="upload-blob b2" />
                 <div className="upload-inner">
                   <div className="upload-badge"><I.Target /> AI-Powered Analysis</div>
-                  <h1 className="upload-title">AI Document Analyser</h1>
+                  <h1 className="upload-title">AI Document Intelligence</h1>
                   <p className="upload-desc">
                     Upload a document or paste your text — we'll extract scope, deadlines, compliance needs &amp; risks instantly.
                   </p>
@@ -603,7 +717,7 @@ function MainApp({ onLogout }) {
                   {/* Analyze button */}
                   {((inputMode === "file" && file) || (inputMode === "text" && manualText.trim().length > 0)) && !loading && (
                     <button className="btn-analyze" onClick={() => handleUpload()}>
-                      Analyze Document →
+                      Analyze Document
                     </button>
                   )}
 
@@ -629,14 +743,18 @@ function MainApp({ onLogout }) {
                       <polyline points="14 2 14 8 20 8" />
                     </svg>
                     <span className="results-title">
-                      {file ? file.name : "Pasted Text"}
+                      {docFilename || "Pasted Text"}
                     </span>
                     <span className="results-badge">Analyzed</span>
-                    {/* Download button — right next to the Analyzed badge */}
-                    {file && (
+                    {/* Download button — right next to the Analyzed badge.
+                        Uses docFilename (not the transient `file` upload
+                        state) so it's available whether this came from a
+                        fresh upload or from reopening a session in the
+                        sidebar. */}
+                    {docFilename && (
                       <a
-                        href={`${BASE_URL}/rfp/download/${encodeURIComponent(file.name)}`}
-                        download={file.name}
+                        href={`${BASE_URL}/rfp/download/${encodeURIComponent(docFilename)}`}
+                        download={docFilename}
                         className="dl-inline-btn"
                         title="Download original file"
                       >
@@ -686,8 +804,8 @@ function MainApp({ onLogout }) {
               <div className="doc-report">
 
                 {/* Summary — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Summary</h2>
+                <div className="doc-section" id="sec-summary">
+                  <SectionHeading id="summary" />
                   {flashData?.executive_summary
                     ? <p className="doc-section-prose">{flashData.executive_summary}</p>
                     : <p className="doc-empty">Not found in this document.</p>
@@ -695,8 +813,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Objectives — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Objectives</h2>
+                <div className="doc-section" id="sec-objectives">
+                  <SectionHeading id="objectives" count={flashData?.objectives?.length || 0} />
                   {flashData?.objectives?.length > 0
                     ? <ul className="doc-list">{flashData.objectives.map((item, i) => (
                         <li key={i}>{typeof item === "string" ? item : item.item || JSON.stringify(item)}</li>
@@ -706,8 +824,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Key Highlights — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Key Highlights</h2>
+                <div className="doc-section" id="sec-highlights">
+                  <SectionHeading id="highlights" count={flashData?.key_highlights?.length || 0} />
                   {flashData?.key_highlights?.length > 0
                     ? <ul className="doc-list">{flashData.key_highlights.map((item, i) => (
                         <li key={i}>{typeof item === "string" ? item : item.item || JSON.stringify(item)}</li>
@@ -717,8 +835,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Scope of Work — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Scope of Work</h2>
+                <div className="doc-section" id="sec-scope">
+                  <SectionHeading id="scope" count={flashData?.project_scope?.length || 0} />
                   {flashData?.project_scope?.length > 0
                     ? <ul className="doc-list">{flashData.project_scope.map((item, i) => (
                         <li key={i}>
@@ -731,8 +849,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Deliverables — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Deliverables</h2>
+                <div className="doc-section" id="sec-deliverables">
+                  <SectionHeading id="deliverables" count={flashData?.deliverables?.length || 0} />
                   {flashData?.deliverables?.length > 0
                     ? <ul className="doc-list">{flashData.deliverables.map((item, i) => (
                         <li key={i}>
@@ -745,8 +863,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Technical Requirements — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Technical Requirements</h2>
+                <div className="doc-section" id="sec-technical">
+                  <SectionHeading id="technical" count={flashData?.technical_requirements?.length || 0} />
                   {flashData?.technical_requirements?.length > 0
                     ? <ul className="doc-list">{flashData.technical_requirements.map((item, i) => (
                         <li key={i}>
@@ -759,8 +877,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Commercial Requirements — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Commercial Requirements</h2>
+                <div className="doc-section" id="sec-commercial">
+                  <SectionHeading id="commercial" count={flashData?.commercial_requirements?.length || 0} />
                   {flashData?.commercial_requirements?.length > 0
                     ? <ul className="doc-list">{flashData.commercial_requirements.map((item, i) => (
                         <li key={i}>
@@ -773,8 +891,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Deadlines — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Key Deadlines &amp; Milestones</h2>
+                <div className="doc-section" id="sec-deadlines">
+                  <SectionHeading id="deadlines" count={flashData?.deadlines?.length || 0} />
                   {flashData?.deadlines?.length > 0
                     ? <ul className="doc-list">{flashData.deadlines.map((item, i) => (
                         <li key={i}>
@@ -789,8 +907,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Staffing — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Staffing Requirements</h2>
+                <div className="doc-section" id="sec-staffing">
+                  <SectionHeading id="staffing" count={flashData?.staffing_requirements?.length || 0} />
                   {flashData?.staffing_requirements?.length > 0
                     ? <ul className="doc-list">{flashData.staffing_requirements.map((item, i) => (
                         <li key={i}>
@@ -805,8 +923,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Risks — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Risks</h2>
+                <div className="doc-section" id="sec-risks">
+                  <SectionHeading id="risks" count={flashData?.risks?.length || 0} />
                   {flashData?.risks?.length > 0
                     ? <ul className="doc-list">{flashData.risks.map((item, i) => (
                         <li key={i}>
@@ -828,8 +946,8 @@ function MainApp({ onLogout }) {
                 </div>
 
                 {/* Compliance Table — always show */}
-                <div className="doc-section">
-                  <h2 className="doc-section-heading">Compliance Requirements</h2>
+                <div className="doc-section" id="sec-compliance">
+                  <SectionHeading id="compliance" count={flashData?.compliance_requirements?.length || 0} />
                   {flashData?.compliance_requirements?.length > 0
                     ? <div className="compliance-table-wrap">
                         <table className="compliance-table">
@@ -851,7 +969,7 @@ function MainApp({ onLogout }) {
                                 <td>{item.page_ref && item.page_ref !== "N/A" ? item.page_ref : "—"}</td>
                                 <td>
                                   {item.mandatory === true
-                                    ? <span className="mandatory-yes">✓ Yes</span>
+                                    ? <span className="mandatory-yes">Yes</span>
                                     : item.mandatory === false
                                       ? <span className="mandatory-no">No</span>
                                       : "—"}
@@ -984,7 +1102,7 @@ function AuthScreen({ onAuthenticated }) {
   return (
     <div className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
-        <div className="auth-title">AI Document Analyser</div>
+        <div className="auth-title">AI Document Intelligence</div>
         <div className="auth-subtitle">
           {mode === "login" ? "Log in to your account" : "Create an account"}
         </div>
@@ -1193,6 +1311,11 @@ const CSS = `
   font-family:var(--font-body);font-size:13px;font-weight:700;cursor:pointer;
   box-shadow:0 4px 12px rgba(239,68,68,0.35);transition:opacity .2s,transform .15s;}
 .btn-danger:hover{opacity:.88;transform:translateY(-1px);}
+.btn-primary{padding:9px 18px;border:none;border-radius:var(--rsm);
+  background:linear-gradient(135deg,var(--accent),var(--accent-h));color:#fff;
+  font-family:var(--font-body);font-size:13px;font-weight:700;cursor:pointer;
+  box-shadow:0 4px 12px var(--accent-r);transition:opacity .2s,transform .15s;}
+.btn-primary:hover{opacity:.88;transform:translateY(-1px);}
 
 /* Header */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
@@ -1488,6 +1611,38 @@ const CSS = `
   padding: 24px;
   box-shadow: var(--sh-sm);
 }
+
+/* ── Section headings: icon chip + title + count badge ── */
+.doc-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sec-icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: var(--sec-color, var(--accent));
+  background: color-mix(in srgb, var(--sec-color, var(--accent)) 16%, transparent);
+  flex-shrink: 0;
+}
+.sec-title {
+  flex: 1;
+}
+.sec-count-badge {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sec-color, var(--accent));
+  background: color-mix(in srgb, var(--sec-color, var(--accent)) 14%, transparent);
+  border-radius: var(--rfull);
+  padding: 2px 9px;
+  flex-shrink: 0;
+}
+
 .doc-section {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--border);

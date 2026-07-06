@@ -1,11 +1,10 @@
 import re
-import sqlite3
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, field_validator
 
-from app.db.database import get_db
+from app.db.database import get_db, IntegrityError
 from app.core.security import hash_password, verify_password, create_access_token
 from app.api.deps import get_current_user
 
@@ -48,7 +47,7 @@ def signup(request: SignupRequest):
                 "INSERT INTO users (id, email, password_hash) VALUES (?, ?, ?)",
                 (user_id, request.email.lower(), password_hash),
             )
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="An account with this email already exists.",
