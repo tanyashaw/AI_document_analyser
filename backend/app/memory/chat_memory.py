@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-from app.db.database import get_db, USING_POSTGRES
+from app.db.database import get_db
 
 
 class PGSessionStore:
-    """All chat/document persistence, backed by PostgreSQL (or SQLite locally)."""
+    """All chat/document persistence, backed by PostgreSQL."""
 
     # ── Documents ─────────────────────────────────────────────────────────
 
@@ -46,16 +46,10 @@ class PGSessionStore:
         """Persist the extracted analysis JSON for a document."""
         blob = json.dumps(analysis, ensure_ascii=False)
         with get_db() as conn:
-            if USING_POSTGRES:
-                conn.execute(
-                    "UPDATE documents SET analysis = ?::jsonb WHERE id = ?",
-                    (blob, document_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE documents SET analysis = ? WHERE id = ?",
-                    (blob, document_id),
-                )
+            conn.execute(
+                "UPDATE documents SET analysis = ?::jsonb WHERE id = ?",
+                (blob, document_id),
+            )
 
     def set_document_type(self, document_id: str, doc_type: str) -> None:
         """Update the doc_type label for a document."""

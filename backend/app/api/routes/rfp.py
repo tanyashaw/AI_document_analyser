@@ -130,26 +130,70 @@ async def upload_rfp(
     existing_doc = session_store.get_document_by_filename(user_id=user_id, filename=file.filename)
 
     if existing_doc is not None:
-        # Re-use existing document and start a new chat session
         document_id = existing_doc["document_id"]
-        doc_type_label = existing_doc["doc_type"] or "Document"
-        session_id = str(uuid4())
-        title = f"{doc_type_label}: {file.filename}"
-        session_store.create_session(
-            session_id=session_id,
-            document_id=document_id,
-            user_id=user_id,
-            title=title,
-        )
-        return {
-            "filename": file.filename,
-            "document_id": document_id,
-            "session_id": session_id,
-            "total_characters": 0,
-            "total_chunks": 0,
-            "message": "Reused existing document embeddings and analysis",
-            "final_extracted_data": existing_doc["analysis"],
-        }
+        # Check if chunks actually exist in ChromaDB for this document
+        from app.vectordb.chroma_client import get_collection
+        try:
+            col = get_collection()
+            existing_chunks = col.get(where={"document_id": document_id}, limit=1)
+            has_chunks = bool(existing_chunks and existing_chunks.get("ids"))
+        except Exception:
+            has_chunks = False
+
+        if has_chunks:
+            # Re-use existing document and start a new chat session
+            doc_type_label = existing_doc["doc_type"] or "Document"
+            session_id = str(uuid4())
+            title = f"{doc_type_label}: {file.filename}"
+            session_store.create_session(
+                session_id=session_id,
+                document_id=document_id,
+                user_id=user_id,
+                title=title,
+            )
+            return {
+                "filename": file.filename,
+                "document_id": document_id,
+                "session_id": session_id,
+                "total_characters": 0,
+                "total_chunks": 0,
+                "message": "Reused existing document embeddings and analysis",
+                "final_extracted_data": existing_doc["analysis"],
+            }
+        else:
+            # Document exists in Postgres but embeddings are missing in ChromaDB.
+            # Regenerate embeddings and run workflow under the same document_id.
+            file_path = UPLOAD_DIR / file.filename
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            text = extract_text_from_pdf(str(file_path))
+
+            meta, workflow_result = process_and_store_document(
+                text=text,
+                document_id=document_id,
+                user_id=user_id,
+                filename=file.filename,
+            )
+
+            doc_type_label = meta["final_extracted_data"].get("document_type_label", "Document")
+            session_store.set_document_type(document_id, doc_type_label)
+
+            session_id = str(uuid4())
+            title = f"{doc_type_label}: {file.filename}"
+            session_store.create_session(
+                session_id=session_id,
+                document_id=document_id,
+                user_id=user_id,
+                title=title,
+            )
+
+            return {
+                "filename": file.filename,
+                "document_id": document_id,
+                "session_id": session_id,
+                **meta,
+            }
 
     # 1. Save file to disk
     file_path = UPLOAD_DIR / file.filename
