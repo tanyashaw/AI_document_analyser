@@ -61,15 +61,12 @@ const SECTION_META = {
 // A single section's heading: icon chip + title + how many items were
 // found. Every section uses this instead of a bare <h2>, so scanning the
 // report tells you at a glance which sections actually have content.
-function SectionHeading({ id, count }) {
+function SectionHeading({ id }) {
   const meta = SECTION_META[id];
   return (
     <h2 className="doc-section-heading" style={{ "--sec-color": meta.color }}>
       <span className="sec-icon-chip"><meta.icon /></span>
       <span className="sec-title">{meta.label}</span>
-      {typeof count === "number" && (
-        <span className="sec-count-badge">{count}</span>
-      )}
     </h2>
   );
 }
